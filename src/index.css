@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth scrolling on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+/* Force remove number input spinners across all browsers */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 2px;
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+/* Dark mode base styles */
+.dark body {
+  background-color: #111827;
+}
+
+/* Smooth transitions for theme changes */
+html {
+  transition: color-scheme 0.3s ease;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
