@@ -187,7 +187,7 @@ export default function BuildingLayerMap({ onBuildingSelect, onLoadingStateChang
                       <div class="flex justify-between items-start mb-1.5 pr-5">
                         <div class="min-w-0 flex-1">
                           <h4 class="text-[13.5px] font-bold text-gray-800 dark:text-gray-100 truncate">${feat.properties.BULD_NM}</h4>
-                          <p className="text-[10px] text-slate-400 dark:text-gray-500 mt-0.5 truncate font-normal">${cleanAddress}</p>
+                          <p class="text-[10px] text-slate-400 dark:text-gray-500 mt-0.5 truncate font-normal">${cleanAddress}</p>
                         </div>
                       </div>
                       <div class="max-h-[185px] overflow-y-auto space-y-1 pr-0.5" style="scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
