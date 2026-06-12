@@ -730,7 +730,7 @@ export default function App() {
             {viewMode === 'map' && unmappedBuildings.length > 0 && (
               <div className="mt-3">
                 <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
-                  ⚠️ 문이 열리지 않는 곳 (주소 불일치 미표시 승강기 {unmappedBuildings.reduce((s, g) => s + g.elevators.length, 0)}대)
+                  주소가 대응되지 않는 건물은 표시하지 못했습니다. (총 {unmappedBuildings.reduce((s, g) => s + g.elevators.length, 0)}대)
                 </div>
                 <div className="mt-2 space-y-2">
                   {unmappedBuildings.map((group, idx) => (
