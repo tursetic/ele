@@ -273,21 +273,19 @@ export async function fetchEleBuildings(bounds: { xmin: number; ymin: number; xm
   const p3857_min = convertWGS84ToEPSG3857(bounds.xmin, bounds.ymin);
   const p3857_max = convertWGS84ToEPSG3857(bounds.xmax, bounds.ymax);
 
-  const bboxParam = `${p3857_min[0]},${p3857_min[1]},${p3857_max[0]},${p3857_max[1]}`;
+  // 📐 공학 정밀도 교정: 미터 좌표 뒤에 ,EPSG:3857 격자 식별 명칭을 명확하게 바인딩
+  const bboxParam = `${p3857_min[0]},${p3857_min[1]},${p3857_max[0]},${p3857_max[1]},EPSG:3857`;
   const viewparamsParam = `xmin:${bounds.xmin};ymin:${bounds.ymin};xmax:${bounds.xmax};ymax:${bounds.ymax}`;
 
-  // 🎯 [CORS 해결 - Cloudflare Functions 활용]
-  // 외부 중계 주소 없이, 내 도메인의 /api/proxy 라우트로 요청을 던집니다.
-  // 실제 백엔드 주소 뒤에 붙던 파라미터들은 템플릿 리터럴로 쿼리 스트링 째로 넘겨줍니다.
   const baseUrl = "/api/proxy";
+  
+  // 🎯 [규격 전면 복원] 오타가 난 레이어명 정정 및 안정적인 1.0.0 표준 버전으로 롤백
   const params = new URLSearchParams({
     SERVICE: 'WFS',
-    VERSION: '1.1.0',
+    VERSION: '1.0.0',
     REQUEST: 'GetFeature',
-    TYPENAME: 'koelsa:building',
-    MAXFEATURES: '100',
     OUTPUTFORMAT: 'application/json',
-    SRSNAME: 'EPSG:3857',
+    TYPENAME: 'koelsadp:building_q', // <-- koelsa:building에서 원본 명칭으로 정정
     BBOX: bboxParam,
     VIEWPARAMS: viewparamsParam
   });
