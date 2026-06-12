@@ -48,7 +48,7 @@ export default function SearchFormAdvanced({
           }`}
         >
           <Hash size={14} />
-          고유번호 검색
+          번호 검색
         </button>
         <button
           onClick={() => onTabChange('address')}
@@ -59,7 +59,7 @@ export default function SearchFormAdvanced({
           }`}
         >
           <MapPin size={14} />
-          도로명 주소 검색
+          주소 검색
         </button>
         <button
           onClick={() => onTabChange('buildingLayer')}
