@@ -360,7 +360,7 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
               <GridCell label="승강기 구분" value={el.elvtrDivNm} show={s.elvtrDivNm} />
               <GridCell label="승강기 형식" value={el.elvtrFormNm} show={s.elvtrFormNm} />
               <GridCell label="운행층수" value={el.shuttleFloorCnt ? `${el.shuttleFloorCnt.trim().replace(/개층|층/g, '')}개 층` : null} />
-              <GridCell label="지상·지하층수" value={`지상 ${el.divGroundFloorCnt || '-'}층 · 지하 ${el.divUndgrndFloorCnt || '-'}층`} />
+              <GridCell label="지상·지하" value={`▵${el.divGroundFloorCnt || '-'} ▿${el.divUndgrndFloorCnt || '-'}`} />
               <GridCell label="적재하중" value={el.liveLoad} show={s.liveLoad} />
               <GridCell label="최대정원" value={el.ratedCap} show={s.ratedCap} />
             </DashboardCard>
@@ -456,7 +456,7 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
                       
                       {(record.applcBeDt || record.applcEnDt) && (
                         <p className="text-slate-400 dark:text-gray-500 pl-1 text-[10.5px] font-normal mt-0.5">
-                          운행유효기간 {formatDate(record.applcBeDt)} ~ {formatDate(record.applcEnDt)}
+                          유효기간 {formatDate(record.applcBeDt)} ~ {formatDate(record.applcEnDt)}
                         </p>
                       )}
                     </div>
