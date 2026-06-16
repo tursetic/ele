@@ -266,7 +266,7 @@ export default function BuildingLayerMap({
                       activeOverlayBuldIdRef.current = buildingId;
 
                       const overlayContent = document.createElement('div');
-                      overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[256px] relative font-sans text-left z-[100]';
+                      overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[265px] relative font-sans text-left z-[100]';
 
                       ['wheel', 'mousewheel', 'mousedown', 'touchstart', 'pointerdown', 'dblclick'].forEach(evt => {
                         overlayContent.addEventListener(evt, (ev) => ev.stopPropagation(), { passive: true });

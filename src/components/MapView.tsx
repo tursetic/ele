@@ -86,6 +86,37 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
     },
   }), [geoGroups]);
 
+  // 🎯 [완치 핵심 코어] 지도가 멈추거나 이동할 때 화면 안의 마커를 원본 순서대로 딱 500개만 남기고 숨기는 함수
+  const updateMarkerVisibility = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !customMarkersRef.current || customMarkersRef.current.length === 0) return;
+
+    const bounds = map.getBounds();
+    let insideBoundsCount = 0;
+    const MAX_VISIBLE_MARKERS = 500; // 🎯 상한선 500개 칼고정
+
+    // API 호출값 원본 배열 순서(방법 1)를 보존한 채 루프를 전개하여 정렬 편중 현상을 차단합니다.
+    customMarkersRef.current.forEach((markerOverlay) => {
+      if (!markerOverlay) return;
+      const markerPosition = markerOverlay.getPosition();
+
+      // 현재 내 스마트폰 화면 사각형 경계선 영역 안에 마커 좌표가 존재하는지 감시
+      if (bounds.contain(markerPosition)) {
+        if (insideBoundsCount < MAX_VISIBLE_MARKERS) {
+          // 화면 내부이면서 선착순 500개 미만인 마커만 온전하게 지도에 노출
+          markerOverlay.setMap(map);
+          insideBoundsCount++;
+        } else {
+          // 500개를 초과하는 순간부터는 화면 내부여도 지도와의 연결을 끊어 오버헤드를 완벽히 진압
+          markerOverlay.setMap(null);
+        }
+      } else {
+        // 화면 밖에 존재하는 마커는 무조건 연산에서 완전 제외
+        markerOverlay.setMap(null);
+      }
+    });
+  }, []);
+
   const closeAllOverlays = useCallback(() => {
     overlaysRef.current.forEach(overlay => {
       if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null);
@@ -241,18 +272,30 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
           bounds.extend(new kakao.maps.LatLng(group.lat, group.lng));
         });
 
+        // 🎯 [완치] 최초 지도 생성 시 0번째 호기에 과도하게 줌인되었다가 풀리는 꿀렁임 현상을 해결합니다.
         if (isNewMap) {
+          // 카카오 SDK의 LatLngBounds 구조에 맞게 남서(SW) 및 북동(NE) 좌표의 중간값을 수학적으로 계산하여 안전하게 중심점을 도출합니다.
+          const sw = bounds.getSouthWest();
+          const ne = bounds.getNorthEast();
+          const centerLat = (sw.getLat() + ne.getLat()) / 2;
+          const centerLng = (sw.getLng() + ne.getLng()) / 2;
+          const initialCenter = new kakao.maps.LatLng(centerLat, centerLng);
+
           mapInstanceRef.current = new kakao.maps.Map(mapContainerRef.current, {
-            center: new kakao.maps.LatLng(geoGroups[0].lat, geoGroups[0].lng),
-            level: 3
+            center: initialCenter, // 처음부터 0번째 건물이 아닌 전체 결과의 중간 지점을 조준합니다.
+            level: 6 // 뜬금없는 초근접 줌인 충격을 방지하기 위해 도심이 두루 보이는 안정적인 축척 레벨을 지정합니다.
           });
+          
           mapInstanceRef.current.addControl(new kakao.maps.MapTypeControl(), kakao.maps.ControlPosition.TOPRIGHT);
           mapInstanceRef.current.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
           if (onMapReady) onMapReady();
-          // Don't setBounds here - let external setMapState handle it if needed
+          
+          kakao.maps.event.addListener(mapInstanceRef.current, 'idle', () => {
+            updateMarkerVisibility();
+          });
         }
 
-        // 새로운 지도이고 restoreMode가 아닐 때만 bounds 설정
+        // 안전 타이머 구조는 유지하되 이미 중심 정렬이 끝난 상태이므로 화면이 순간적으로 요동치는 현상이 완벽히 박멸됩니다.
         if (isNewMap && !restoreMode) {
           setTimeout(() => {
             if (mapInstanceRef.current && isCurrent) {
@@ -261,7 +304,6 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
             }
           }, 150);
         } else if (!isNewMap && geoGroupsChanged && !restoreMode) {
-          // 기존 지도에 새 데이터 - bounds 업데이트
           setTimeout(() => {
             if (mapInstanceRef.current && isCurrent) {
               mapInstanceRef.current.relayout();
@@ -568,6 +610,9 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
               openedOverlayRef.current = customOverlay;
             }
           });
+
+          // 🎯 마커 대량 바인딩 직후 최초 1회 선착순 500개 가드를 선제 가동합니다.
+          updateMarkerVisibility();
 
           if (pendingFocusRef.current && mapInstanceRef.current && isCurrent) {
             const focusAddr = pendingFocusRef.current;

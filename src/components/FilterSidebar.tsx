@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { X, ChevronDown, ChevronUp, Search, ChevronRight } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { Elevator, FilterOptions } from '../types';
+
+// 🎯 [완치 결합] elevatorHelpers.ts에 등록된 정품 포맷팅 함수들을 직접 이식하여 데이터 정합성을 100% 동기화합니다.
+import { formatRatedSpeed, extractYear } from '../utils/elevatorHelpers';
 
 interface Props {
   filters: FilterOptions;
@@ -50,18 +53,17 @@ function parseLeadingNumber(str: string): number {
   return match ? parseFloat(match[1]) : 0;
 }
 
-function Checkbox({ checked }: { checked: boolean }) {
+// 🎯 [정품 UX] 요구사항 반영: 체크박스 내부에 숫자가 표출되며, 선택 시 파란 배경에 흰 숫자가 영구 유지되는 컴포넌트
+function CountCheckbox({ checked, count }: { checked: boolean; count: number }) {
   return (
     <div
-      className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 transition-colors ${
-        checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300 dark:border-gray-600'
+      className={`min-w-[28px] h-5 rounded border text-[9.5px] font-bold flex items-center justify-center shrink-0 transition-colors tracking-tighter px-0.5 ${
+        checked 
+          ? 'bg-blue-600 border-blue-600 text-white shadow-xs' 
+          : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
       }`}
     >
-      {checked && (
-        <svg viewBox="0 0 10 8" width="5" height="4" fill="none">
-          <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
+      {count}
     </div>
   );
 }
@@ -81,8 +83,58 @@ export default function FilterSidebar({
   hideEscalator,
   onHideEscalatorChange,
 }: Props) {
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-  const [collapsedMfrs, setCollapsedMfrs] = useState<Set<string>>(new Set());
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['elvtrModel']));
+
+  // 🎯 [완치 엔진] 원본 데이터 배열을 훑으며 정품 포맷팅 결과물 값 그대로 카운팅 키를 일치시킵니다.
+  const filterCounts = useMemo(() => {
+    const counts: Record<string, Record<string, number>> = {
+      divGroundFloorCnt: {},
+      ratedSpeed: {},
+      installationYear: {},
+      liveLoad: {},
+      elvtrDivNm: {},
+      elvtrFormNm: {},
+      elvtrKindNm: {},
+      elvtrStts: {},
+      lastResultNm: {},
+      elvtrModel: {},
+    };
+
+    elevators.forEach((el: any) => {
+      // 1. 일반 필드 카운팅
+      const standardFields = ['elvtrDivNm', 'elvtrFormNm', 'elvtrKindNm', 'elvtrStts', 'lastResultNm', 'divGroundFloorCnt'];
+      standardFields.forEach((f) => {
+        const val = el[f]?.toString().trim();
+        if (val) counts[f][val] = (counts[f][val] || 0) + 1;
+      });
+
+      // 2. [정격 속도 완치] helpers.ts 정품 formatRatedSpeed 통과 결과물로 카운팅 키를 통일하여 0대 해제
+      if (el.ratedSpeed) {
+        const displaySpeed = formatRatedSpeed(el.ratedSpeed);
+        counts['ratedSpeed'][displaySpeed] = (counts['ratedSpeed'][displaySpeed] || 0) + 1;
+      }
+
+      // 3. [적재 하중 완치] 원본의 liveLoad 문자열 원형 그대로 카운팅 매핑하여 0대 해제
+      if (el.liveLoad) {
+        const loadVal = el.liveLoad.toString().trim();
+        counts['liveLoad'][loadVal] = (counts['liveLoad'][loadVal] || 0) + 1;
+      }
+
+      // 4. [설치 연도 완치] 정품 extractYear 가동 결과물(4자리 순수 숫자 예: 2011)로 카운팅 매핑하여 0대 해제
+      const year = extractYear(el.installationDe) || extractYear(el.frstInstallationDe);
+      if (year) {
+        counts['installationYear'][year] = (counts['installationYear'][year] || 0) + 1;
+      }
+
+      // 5. 모델명 카운팅
+      if (el.elvtrModel) {
+        const model = el.elvtrModel.trim();
+        counts['elvtrModel'][model] = (counts['elvtrModel'][model] || 0) + 1;
+      }
+    });
+
+    return counts;
+  }, [elevators]);
 
   const mfrTree = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -122,13 +174,6 @@ export default function FilterSidebar({
     setExpandedSections(next);
   };
 
-  const toggleMfr = (mfr: string) => {
-    const next = new Set(collapsedMfrs);
-    if (next.has(mfr)) next.delete(mfr);
-    else next.add(mfr);
-    setCollapsedMfrs(next);
-  };
-
   const toggleValue = (key: string, value: string) => {
     const current = selected[key] ?? [];
     const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
@@ -164,83 +209,76 @@ export default function FilterSidebar({
     const totalSelected = mfrSelected.length + modelSelected.length;
 
     return (
-      <div className="border-b border-gray-100 dark:border-gray-700">
+      <div className="border-b border-gray-100 dark:border-gray-700/70">
         <button
           onClick={() => toggleSection('elvtrModel')}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+          className={`w-full flex items-center justify-between px-3.5 py-3 transition-colors ${
+            isExpanded ? 'bg-gray-50/80 dark:bg-gray-700/30' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/20'
+          }`}
         >
-          <span className="text-[11px] font-medium text-gray-600 dark:text-gray-400">제조업체 및 모델명</span>
+          <span className="text-[12px] font-bold text-gray-800 dark:text-gray-200">제조업체 및 모델명</span>
           <div className="flex items-center gap-1.5">
             {totalSelected > 0 && (
-              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">{totalSelected}</span>
+              <span className="text-[10px] bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-bold px-1.5 py-0.5 rounded-md">{totalSelected}</span>
             )}
-            {isExpanded ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
+            {isExpanded ? <ChevronUp size={13} className="text-gray-500" /> : <ChevronDown size={13} className="text-gray-500" />}
           </div>
         </button>
 
         {isExpanded && (
-          <div className="px-3 pb-2 space-y-1.5">
+          <div className="px-3.5 pt-2 pb-3 space-y-2 bg-white dark:bg-gray-800">
             <div className="relative">
-              <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 value={modelKeyword}
                 onChange={(e) => onModelKeywordChange(e.target.value)}
                 placeholder="모델명 검색"
-                className="w-full pl-6 pr-2 py-1 bg-gray-50 dark:bg-gray-700 border-0 rounded text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full pl-7 pr-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
               />
             </div>
 
-            <div className="max-h-40 overflow-y-auto space-y-0.5">
+            <div className="max-h-52 overflow-y-auto space-y-1 pr-1" style={{ scrollbarWidth: 'thin' }}>
               {Array.from(filteredMfrTree.entries()).map(([mfr, models]) => {
-                const isMfrExpanded = !collapsedMfrs.has(mfr);
                 const isMfrSelected = mfrSelected.includes(mfr);
+                const mfrTotalCount = models.reduce((acc, m) => acc + (filterCounts['elvtrModel'][m] || 0), 0);
 
                 return (
-                  <div key={mfr}>
-                    <div className="flex items-center">
-                      <button
-                        onClick={() => toggleMfr(mfr)}
-                        className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                      >
-                        <ChevronRight
-                          size={10}
-                          className={`text-gray-400 transition-transform ${isMfrExpanded ? 'rotate-90' : ''}`}
-                        />
-                      </button>
+                  <div key={mfr} className="space-y-0.5">
+                    {/* 🎯 화살표 접기 단추 완전 폐기 및 평면 단일 구조 리스트 고수 */}
+                    <div className="flex items-center hover:bg-gray-50 dark:hover:bg-gray-700/40 rounded transition-colors px-1">
                       <button
                         onClick={() => toggleValue('manufacturerName', mfr)}
-                        className={`flex items-center gap-1.5 flex-1 py-0.5 pr-1 text-[11px] text-left transition-colors ${
-                          isMfrSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'
+                        className={`flex items-center gap-2 flex-1 py-1.5 text-[11px] text-left font-semibold transition-colors ${
+                          isMfrSelected ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-700 dark:text-gray-300'
                         }`}
                       >
-                        <Checkbox checked={isMfrSelected} />
+                        <CountCheckbox checked={isMfrSelected} count={mfrTotalCount} />
                         <span className="truncate">{mfr}</span>
-                        <span className="text-[9px] text-gray-400">({models.length})</span>
                       </button>
                     </div>
 
-                    {isMfrExpanded && (
-                      <div className="ml-5 space-y-0.5">
-                        {models.map((model) => {
-                          const isModelSelected = modelSelected.includes(model);
-                          return (
-                            <button
-                              key={model}
-                              onClick={() => toggleValue('elvtrModel', model)}
-                              className={`flex items-center gap-1.5 w-full py-0.5 pr-1 text-[10px] text-left transition-colors ${
-                                isModelSelected
-                                  ? 'text-blue-600 dark:text-blue-400'
-                                  : 'text-gray-500 dark:text-gray-500 hover:text-gray-700'
-                              }`}
-                            >
-                              <Checkbox checked={isModelSelected} />
-                              <span className="truncate">{model}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <div className="ml-4 mt-0.5 mb-1 border-l border-gray-100 dark:border-gray-700 pl-2 space-y-0.5">
+                      {models.map((model) => {
+                        const isModelSelected = modelSelected.includes(model);
+                        const modelCount = filterCounts['elvtrModel'][model] || 0;
+
+                        return (
+                          <button
+                            key={model}
+                            onClick={() => toggleValue('elvtrModel', model)}
+                            className={`flex items-center gap-2 w-full py-1 px-1.5 rounded text-[10.5px] text-left hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
+                              isModelSelected
+                                ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50/30 dark:bg-blue-950/10'
+                                : 'text-gray-500 dark:text-gray-400 font-medium'
+                            }`}
+                          >
+                            <CountCheckbox checked={isModelSelected} count={modelCount} />
+                            <span className="truncate">{model}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
@@ -253,41 +291,41 @@ export default function FilterSidebar({
 
   return (
     <div className="fixed inset-0 z-50 flex" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="absolute inset-0 bg-black/40 dark:bg-black/60" onClick={onClose} />
-      <div className="relative ml-auto bg-white dark:bg-gray-800 w-72 max-w-[85vw] h-screen flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-700 shrink-0">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">필터</h3>
-          <div className="flex items-center gap-2">
+      <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-xs" onClick={onClose} />
+      <div className="relative ml-auto bg-white dark:bg-gray-800 w-76 max-w-[85vw] h-screen flex flex-col shadow-2xl font-sans">
+        
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700 shrink-0 bg-gray-50/50 dark:bg-gray-900/20">
+          <h3 className="text-[13.5px] font-black text-gray-900 dark:text-gray-100">필터 검색옵션</h3>
+          <div className="flex items-center gap-3">
             <button
               onClick={clearAll}
-              className="text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
+              className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 active:scale-95 transition-all"
             >
-              초기화
+              전체 초기화
             </button>
-            <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
-              <X size={14} className="text-gray-400" />
+            <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700 transition-colors">
+              <X size={15} className="text-gray-500 dark:text-gray-400" />
             </button>
           </div>
         </div>
 
-        <div className="overflow-y-auto flex-1 py-1">
-          <div className="border-b border-gray-100 dark:border-gray-700">
+        <div className="overflow-y-auto flex-1 py-1 bg-white dark:bg-gray-800" style={{ scrollbarWidth: 'thin' }}>
+          
+          {/* 🎯 [스위치 복완] 꼬여서 증발했던 Tailwind flex 구조 및 노브 마진을 완벽하게 재건하여 복구 완료 */}
+          <div className="border-b border-gray-100 dark:border-gray-700/70 px-4 py-3 flex items-center justify-between">
+            <span className="text-[12px] font-bold text-gray-800 dark:text-gray-200">에스컬레이터 · 무빙워크 숨김</span>
             <button
+              type="button"
               onClick={() => onHideEscalatorChange(!hideEscalator)}
-              className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+              className={`w-8 h-4.5 rounded-full transition-colors relative shrink-0 focus:outline-none ${
+                hideEscalator ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+              }`}
             >
-              <span className="text-[11px] font-medium text-gray-600 dark:text-gray-400">에스컬레이터 숨기기</span>
               <div
-                className={`w-7 h-4 rounded-full transition-colors relative shrink-0 ${
-                  hideEscalator ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                className={`absolute top-0.5 w-3.5 h-3.5 bg-white rounded-full shadow-md transition-transform ${
+                  hideEscalator ? 'translate-x-4' : 'translate-x-0.5'
                 }`}
-              >
-                <div
-                  className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${
-                    hideEscalator ? 'translate-x-3.5' : 'translate-x-0.5'
-                  }`}
-                />
-              </div>
+              />
             </button>
           </div>
 
@@ -301,30 +339,32 @@ export default function FilterSidebar({
             const selectedCount = (selected[key] ?? []).length;
 
             return (
-              <div key={key} className="border-b border-gray-100 dark:border-gray-700">
+              <div key={key} className="border-b border-gray-100 dark:border-gray-700/70">
                 <button
                   onClick={() => toggleSection(key)}
-                  className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 transition-colors ${
+                    isExpanded ? 'bg-gray-50/80 dark:bg-gray-700/30' : 'hover:bg-gray-50/50 dark:hover:bg-gray-700/20'
+                  }`}
                 >
-                  <span className="text-[11px] font-medium text-gray-600 dark:text-gray-400">{label}</span>
+                  <span className="text-[12px] font-bold text-gray-800 dark:text-gray-200">{label}</span>
                   <div className="flex items-center gap-1.5">
                     {selectedCount > 0 && (
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">{selectedCount}</span>
+                      <span className="text-[10px] bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-bold px-1.5 py-0.5 rounded-md">{selectedCount}</span>
                     )}
-                    {isExpanded ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
+                    {isExpanded ? <ChevronUp size={13} className="text-gray-500" /> : <ChevronDown size={13} className="text-gray-500" />}
                   </div>
                 </button>
 
                 {isExpanded && (
-                  <div className="px-3 pb-2 space-y-1.5">
+                  <div className="px-3.5 pt-2 pb-3 space-y-2 bg-white dark:bg-gray-800">
                     {hasTextInput === 'number' && (
                       <input
                         type="number"
                         value={minGroundFloor}
                         onChange={(e) => onMinGroundFloorChange(e.target.value)}
-                        placeholder="최소 지상층"
+                        placeholder="최소 지상층 지정 (이상)"
                         min="0"
-                        className="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border-0 rounded text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
                       />
                     )}
                     {hasTextInput === 'speed' && (
@@ -332,27 +372,30 @@ export default function FilterSidebar({
                         type="number"
                         value={minSpeed}
                         onChange={(e) => onMinSpeedChange(e.target.value)}
-                        placeholder="최소 속도 (m/min)"
+                        placeholder="최소 속도 지정 (m/min 이상)"
                         min="0"
                         step="0.1"
-                        className="w-full px-2 py-1 bg-gray-50 dark:bg-gray-700 border-0 rounded text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
                       />
                     )}
 
-                    <div className="max-h-32 overflow-y-auto space-y-0.5">
+                    <div className="max-h-36 overflow-y-auto space-y-0.5 pr-1" style={{ scrollbarWidth: 'thin' }}>
                       {values.map((value) => {
                         const isSelected = (selected[key] ?? []).includes(value);
+                        const itemCount = filterCounts[key]?.[value] || 0;
+
                         return (
                           <button
                             key={value}
                             onClick={() => toggleValue(key, value)}
-                            className={`flex items-center gap-1.5 w-full py-0.5 text-[11px] text-left transition-colors ${
+                            className={`flex items-center gap-2 w-full py-1.5 px-2 rounded-md text-[11px] text-left hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors ${
                               isSelected
-                                ? 'text-blue-600 dark:text-blue-400'
-                                : 'text-gray-500 dark:text-gray-500 hover:text-gray-700'
+                                ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50/40 dark:bg-blue-950/15'
+                                : 'text-gray-600 dark:text-gray-300 font-medium'
                             }`}
                           >
-                            <Checkbox checked={isSelected} />
+                            {/* 🎯 네모 상자 체크박스 대수 동적 바인딩 컴포넌트 호출 */}
+                            <CountCheckbox checked={isSelected} count={itemCount} />
                             <span className="truncate">{value}</span>
                           </button>
                         );

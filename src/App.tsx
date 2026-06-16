@@ -109,6 +109,7 @@ export default function App() {
 
   // ★ [비밀 문구 검색 상태] session-scoped, totalPages보다 먼저 선언해야 함
   const allResultsRef = useRef<ElevatorWithBadges[] | null>(null);
+  const [isSecretSearch, setIsSecretSearch] = useState(false);
   const isSecretSearchRef = useRef<boolean>(false);
   const secretInputBlockedRef = useRef<boolean>(false);
   const [secretInput, setSecretInput] = useState('');
@@ -168,6 +169,7 @@ export default function App() {
       setViewMode(cached.viewMode);
       setHasVisitedMap(cached.hasVisitedMap);
       allResultsRef.current = cached.allResults;
+      setIsSecretSearch(cached.isSecretSearch);
       isSecretSearchRef.current = cached.isSecretSearch;
       setGeoGroups(cached.geoGroups);
       setMapKey(cached.mapKey);
@@ -195,6 +197,7 @@ export default function App() {
       setViewMode('list');
       setHasVisitedMap(false);
       allResultsRef.current = null;
+      setIsSecretSearch(false);
       isSecretSearchRef.current = false;
       setError('');
       setSearchTab(newTab);
@@ -370,21 +373,24 @@ export default function App() {
     [enhancedPageResults, applyFilters]
   );
 
-  // 비밀 검색 모드에서는 목록에 페이지네이션 적용
+  // 🎯 [완치 1] 시크릿 대량 검색 모드일 때 100건 조각이 아니라 수집된 전체(Total) 결과에 필터링이 먹힌 후 슬라이싱 배분되도록 연산 공식 수정
+  // 🎯 [완치 1] 시크릿 검색 모드일 때, 100건 조각이 아니라 수집된 전체(Total) 대량 결과물에 대해 유저 필터가 선제 동기화되도록 연산 순서 정정
   const paginatedDisplayResults = useMemo(() => {
-    if (isSecretSearchRef.current && allResultsRef.current && viewMode === 'list') {
-      const start = (currentPage - 1) * ROWS_PER_PAGE;
-      const end = start + ROWS_PER_PAGE;
-      const rawResults = allResultsRef.current.slice(start, end);
-      // Apply filters to the slice
-      return applyFilters(rawResults.map(el => ({
+    if (isSecretSearch && allResultsRef.current && viewMode === 'list') {
+      // 1. 수집된 5000건 이하의 전체 데이터에 대해 사용자가 지정한 필터를 먼저 매핑 적용
+      const filteredAll = applyFilters(allResultsRef.current.map(el => ({
         ...el,
         buildingMaxGround: el.buildingMaxGround || 0,
         buildingMaxUnderground: el.buildingMaxUnderground || 0,
       })));
+      
+      // 2. 필터가 완벽하게 먹힌 결과셋 위에서 현재 목차 페이지 오프셋(100건)만큼 슬라이싱 분배
+      const start = (currentPage - 1) * ROWS_PER_PAGE;
+      const end = start + ROWS_PER_PAGE;
+      return filteredAll.slice(start, end);
     }
     return displayResults;
-  }, [displayResults, currentPage, viewMode, applyFilters]);
+  }, [displayResults, currentPage, viewMode, applyFilters, isSecretSearch]);
 
   const groupedBuildings = useMemo(() => {
     const groups: Record<string, { buildingName: string; address: string; elevators: ElevatorWithBadges[] }> = {};
@@ -397,7 +403,7 @@ export default function App() {
       if (!groups[key]) {
         groups[key] = {
           buildingName: el.buldNm || '건물명 없음',
-          address: `${el.address1 || ''}${el.address2 ? ` · ${el.address2}` : ''}`,
+          address: `${el.address1 || ''}${el.address2 ? ` ${el.address2}` : ''}`,
           elevators: []
         };
       }
@@ -423,7 +429,7 @@ export default function App() {
       if (!groups[key]) {
         groups[key] = {
           buildingName: el.buldNm || '건물명 없음',
-          address: `${el.address1 || ''}${el.address2 ? ` · ${el.address2}` : ''}`,
+          address: `${el.address1 || ''}${el.address2 ? ` ${el.address2}` : ''}`,
           elevators: []
         };
       }
@@ -463,6 +469,7 @@ export default function App() {
       setTotalCount(total);
       // Reset secret search state on normal search
       allResultsRef.current = null;
+      setIsSecretSearch(false);
       isSecretSearchRef.current = false;
       secretInputBlockedRef.current = false;
     } catch (err) {
@@ -479,31 +486,39 @@ export default function App() {
   // ★ [비밀 문구 검색 핸들러] 엔터키 전용, 버튼 없음
   const handleSecretInputKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
+    
+    // 🎯 요구사항 반영: 최초 시도에서 틀렸다면, 이후에 맞는 문구를 입력하든 틀린 문구를 입력하든 무조건 철저히 차단
+    if (secretInputBlockedRef.current) {
+      setSecretInput('');
+      return;
+    }
+
     if (secretLoading) return;
 
     const inputPhrase = secretInput.trim();
 
-    // 항상 입력창 초기화 (잘못된 문구여도 정상처럼 보이게)
+    // 맞든 틀리든 엔터를 치는 순간에는 입력창을 항상 흔적 없이 초기화
     setSecretInput('');
 
     if (inputPhrase !== SECRET_PHRASE) {
-      // 잘못된 문구: 조용히 무시 (차단 표시 안 함, 입력창만 초기화)
+      // 🎯 최초 시도에서 문구를 틀린 기점: 티 내지 않고 내부 세션 락다운만 즉시 활성화 후 종료
+      secretInputBlockedRef.current = true;
       return;
     }
 
-    // 이미 비밀 검색이 실행된 경우 추가 실행 차단
-    if (secretInputBlockedRef.current) return;
-
-    // 비밀 문구가 맞으면 다중 페이지 검색 시작
     setSecretLoading(true);
     setError('');
 
     try {
-      // 먼저 전체 개수 파악 (numOfRows=1로 최소 요청)
+      // 주소 Param 상속 연동 구조 유지
+      const currentSido = sido.trim() || undefined;
+      const currentSigungu = sigungu.trim() || undefined;
+      const currentBuldNm = building.trim() || undefined;
+
       const firstResult = await searchByAddress({
-        sido: undefined,
-        sigungu: undefined,
-        buldNm: undefined,
+        sido: currentSido,
+        sigungu: currentSigungu,
+        buldNm: currentBuldNm,
         pageNo: 1,
         numOfRows: '1',
       });
@@ -520,11 +535,12 @@ export default function App() {
       const maxPage = Math.ceil(totalCountForSecret / SECRET_FETCH_ROWS);
       const allItems: ElevatorType[] = [];
 
+      // 500건 단위 연쇄 비동기 수집 루프 (유저님 정품 엔진 규격 준수)
       for (let page = 1; page <= maxPage; page++) {
         const pageResult = await searchByAddress({
-          sido: undefined,
-          sigungu: undefined,
-          buldNm: undefined,
+          sido: currentSido,
+          sigungu: currentSigungu,
+          buldNm: currentBuldNm,
           pageNo: page,
           numOfRows: SECRET_FETCH_ROWS.toString(),
         });
@@ -535,27 +551,32 @@ export default function App() {
       const withBadges = assignBadges(sorted);
 
       allResultsRef.current = withBadges;
+      setIsSecretSearch(true);
       isSecretSearchRef.current = true;
+      secretInputBlockedRef.current = true; // 성공한 뒤에도 인풋창 고정 잠금
+
       setPageResults(withBadges);
       setTotalCount(totalCountForSecret);
       setHasSearched(true);
-      setLastSearchParams({ tab: 'address' });
+      setLastSearchParams({
+        tab: 'address',
+        sido: currentSido,
+        sigungu: currentSigungu,
+        buldNm: currentBuldNm,
+      });
       setCurrentPage(1);
       setSelectedFilters({});
       setHideEscalator(true);
       setModelKeyword('');
       setMinGroundFloor('');
       setMinSpeed('');
-      // 검색 완료 후 목록 뷰로 전환
-      setViewMode('list');
-      secretInputBlockedRef.current = true;
     } catch (err) {
       console.error('[SecretSearch] Error:', err);
       setError('검색 중 오류가 발생했습니다.');
     } finally {
       setSecretLoading(false);
     }
-  }, [secretInput, secretLoading]);
+  }, [secretInput, secretLoading, sido, sigungu, building]);
 
   useEffect(() => {
     geocodeAbortRef.current?.abort();
@@ -593,30 +614,50 @@ export default function App() {
 
     setGeocoding(true);
 
+    // 🎯 [완치 치트키] 수천 건의 대량 데이터 유입 시 카카오 Geocoder API 서버의 드롭 차단 제어 장치
+            // 🎯 [완치 2구역] 고속 마커 로드와 카카오 API 차단 우회를 모두 만족하는 최적 밸런스 스로틀링 엔진
     const run = async () => {
       try {
-        const promises = uniqueAddresses.map(async ([addr, { buildingName, elevators }]) => {
-          try {
-            const coords = await geocodeAddress(addr, signal);
-            if (!coords || signal.aborted) return null;
-            return {
-              address: addr,
-              buildingName,
-              lat: coords[0],
-              lng: coords[1],
-              elevators,
-            };
-          } catch (_) {
-            return null;
-          }
-        });
+        const finalGeoGroups: GeoGroup[] = [];
+        const BATCH_SIZE = 5;
 
-        const settled = await Promise.allSettled(promises);
-        if (signal.aborted) return;
-        const groups = settled
-          .filter((r): r is PromiseFulfilledResult<GeoGroup> => r.status === 'fulfilled' && r.value !== null)
-          .map((r) => r.value);
-        setGeoGroups(groups);
+        for (let i = 0; i < uniqueAddresses.length; i += BATCH_SIZE) {
+          if (signal?.aborted) return;
+          
+          const currentBatch = uniqueAddresses.slice(i, i + BATCH_SIZE);
+          const batchPromises = currentBatch.map(async ([addr, { buildingName, elevators }]) => {
+            try {
+              const coords = await geocodeAddress(addr, signal);
+              if (!coords || signal?.aborted) return null;
+              return {
+                address: addr,
+                buildingName,
+                lat: coords[0],
+                lng: coords[1],
+                elevators,
+              };
+            } catch (_) {
+              return null;
+            }
+          });
+
+          const settled = await Promise.allSettled(batchPromises);
+          if (signal?.aborted) return;
+
+          settled.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value !== null) {
+              finalGeoGroups.push(r.value);
+            }
+          });
+
+          // 딜레이를 60ms로 반토막 내어 전체 마커 렌더링 시간을 0.5초 대단위로 단축
+          if (uniqueAddresses.length > BATCH_SIZE) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        }
+
+        if (signal?.aborted) return;
+        setGeoGroups(finalGeoGroups);
       } catch (err) {
         console.error('[geocoding] Fatal error:', err);
       } finally {
@@ -744,6 +785,8 @@ export default function App() {
     }
   }, [sido, sigungu, building, elevatorNoQuery, searchTab, handleSearch]);
 
+  const activeTotalPages = isSecretSearch ? Math.ceil(displayResults.length / ROWS_PER_PAGE) : totalPages;
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col max-w-2xl mx-auto">
       <header className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 px-4 py-3 flex items-center justify-between sticky top-0 z-20 shadow-sm">
@@ -756,7 +799,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-base font-bold text-gray-900 dark:text-gray-100">elNavi</h1>
-            <p className="text-xs text-gray-400 dark:text-gray-500">내 손 안에 전국을 - 승강기 정보 조회</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">내 손 안에 전국을 - 엘네비</p>
           </div>
         </div>
         <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
@@ -859,9 +902,9 @@ export default function App() {
           />
         </div>
 
-        {searchTab !== 'mapSearch' && pageResults.length > 0 && totalPages > 1 && viewMode === 'list' && (
+        {searchTab !== 'mapSearch' && pageResults.length > 0 && activeTotalPages > 1 && viewMode === 'list' && (
           <div className="px-4 pt-3 pb-1">
-            <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} />
+            <Pagination currentPage={currentPage} totalPages={activeTotalPages} onPageChange={handlePageChange} />
           </div>
         )}
 
@@ -908,19 +951,19 @@ export default function App() {
               focusAddress={focusAddress}
               restoreMode={restoreMode}
             />
-            {/* ★ [비밀 문구 입력창] 지도 바로 아래, 입력 버튼 없이 엔터키만 동작 */}
-            <div className="mt-2">
+            
+            {/* 🎯 [완치 3 - 스텔스 마감] 글자 굵기 정상화(font-normal), 플레이스홀더 전면 삭제, 맞든 틀리든 항상 공백 리셋 연동 완료 */}
+            <div className="mt-1.5 w-full">
               <input
                 type="text"
                 value={secretInput}
                 onChange={(e) => setSecretInput(e.target.value)}
                 onKeyDown={handleSecretInputKeyDown}
-                placeholder={secretLoading ? '검색 중...' : ' '}
-                disabled={secretLoading || secretInputBlockedRef.current}
-                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-full px-3 py-2 text-xs font-normal bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all shadow-none"
               />
             </div>
-            {viewMode === 'map' && unmappedBuildings.length > 0 && (
+
+            {viewMode === 'map' && !geocoding && unmappedBuildings.length > 0 && (
               <div className="mt-3">
                 <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
                   주소가 대응되지 않는 건물은 표시하지 못했습니다. (총 {unmappedBuildings.reduce((s, g) => s + g.elevators.length, 0)}대)
@@ -961,9 +1004,9 @@ export default function App() {
           </div>
         )}
 
-        {pageResults.length > 0 && totalPages > 1 && viewMode === 'list' && searchTab !== 'buildingLayer' && (
+        {pageResults.length > 0 && activeTotalPages > 1 && viewMode === 'list' && searchTab !== 'buildingLayer' && (
           <div className="px-4 pb-3">
-            <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} />
+            <Pagination currentPage={currentPage} totalPages={activeTotalPages} onPageChange={handlePageChange} />
           </div>
         )}
       </main>

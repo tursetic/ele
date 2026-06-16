@@ -87,7 +87,11 @@ export default function SearchFormAdvanced({
           <input
             type="text"
             value={elevatorNoQuery}
-            onChange={(e) => onElevatorNoQueryChange(e.target.value)}
+            // 🎯 [수정] 정규식을 이용하여 숫자가 아닌 문자가 유입되는 순간 흔적 없이 실시간 파괴 처리합니다.
+            onChange={(e) => {
+              const onlyNums = e.target.value.replace(/[^0-9]/g, '');
+              onElevatorNoQueryChange(onlyNums);
+            }}
             onKeyDown={handleKeyDown}
             placeholder="예: 1234567"
             maxLength={7}
