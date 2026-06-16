@@ -86,32 +86,27 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
     },
   }), [geoGroups]);
 
-  // 🎯 [완치 핵심 코어] 지도가 멈추거나 이동할 때 화면 안의 마커를 원본 순서대로 딱 500개만 남기고 숨기는 함수
+  // 🎯 [완치 핵심 코어] 화면 내부 마커의 노출 한계선을 원본 순서 기준 300개로 변경하여 대량 로드 성능을 보장합니다.
   const updateMarkerVisibility = useCallback(() => {
     const map = mapInstanceRef.current;
     if (!map || !customMarkersRef.current || customMarkersRef.current.length === 0) return;
 
     const bounds = map.getBounds();
     let insideBoundsCount = 0;
-    const MAX_VISIBLE_MARKERS = 500; // 🎯 상한선 500개 칼고정
+    const MAX_VISIBLE_MARKERS = 300; // 🎯 유저 요구사항: 최대 300개로 조절 완료
 
-    // API 호출값 원본 배열 순서(방법 1)를 보존한 채 루프를 전개하여 정렬 편중 현상을 차단합니다.
     customMarkersRef.current.forEach((markerOverlay) => {
       if (!markerOverlay) return;
       const markerPosition = markerOverlay.getPosition();
 
-      // 현재 내 스마트폰 화면 사각형 경계선 영역 안에 마커 좌표가 존재하는지 감시
       if (bounds.contain(markerPosition)) {
         if (insideBoundsCount < MAX_VISIBLE_MARKERS) {
-          // 화면 내부이면서 선착순 500개 미만인 마커만 온전하게 지도에 노출
           markerOverlay.setMap(map);
           insideBoundsCount++;
         } else {
-          // 500개를 초과하는 순간부터는 화면 내부여도 지도와의 연결을 끊어 오버헤드를 완벽히 진압
           markerOverlay.setMap(null);
         }
       } else {
-        // 화면 밖에 존재하는 마커는 무조건 연산에서 완전 제외
         markerOverlay.setMap(null);
       }
     });
@@ -272,9 +267,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
           bounds.extend(new kakao.maps.LatLng(group.lat, group.lng));
         });
 
-        // 🎯 [완치] 최초 지도 생성 시 0번째 호기에 과도하게 줌인되었다가 풀리는 꿀렁임 현상을 해결합니다.
         if (isNewMap) {
-          // 카카오 SDK의 LatLngBounds 구조에 맞게 남서(SW) 및 북동(NE) 좌표의 중간값을 수학적으로 계산하여 안전하게 중심점을 도출합니다.
           const sw = bounds.getSouthWest();
           const ne = bounds.getNorthEast();
           const centerLat = (sw.getLat() + ne.getLat()) / 2;
@@ -282,8 +275,8 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
           const initialCenter = new kakao.maps.LatLng(centerLat, centerLng);
 
           mapInstanceRef.current = new kakao.maps.Map(mapContainerRef.current, {
-            center: initialCenter, // 처음부터 0번째 건물이 아닌 전체 결과의 중간 지점을 조준합니다.
-            level: 6 // 뜬금없는 초근접 줌인 충격을 방지하기 위해 도심이 두루 보이는 안정적인 축척 레벨을 지정합니다.
+            center: initialCenter,
+            level: 6
           });
           
           mapInstanceRef.current.addControl(new kakao.maps.MapTypeControl(), kakao.maps.ControlPosition.TOPRIGHT);
@@ -295,7 +288,6 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
           });
         }
 
-        // 안전 타이머 구조는 유지하되 이미 중심 정렬이 끝난 상태이므로 화면이 순간적으로 요동치는 현상이 완벽히 박멸됩니다.
         if (isNewMap && !restoreMode) {
           setTimeout(() => {
             if (mapInstanceRef.current && isCurrent) {
@@ -390,7 +382,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
             const isMultiBuilding = bldgEntries.length > 1;
 
             const overlayContent = document.createElement('div');
-            overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[256px] relative font-sans';
+            overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[275px] relative font-sans';
 
             const blockMapInteractions = (e: Event) => { e.stopPropagation(); };
             ['wheel', 'mousewheel', 'DOMMouseScroll', 'mousedown', 'touchstart', 'pointerdown', 'dblclick'].forEach(evt => {
@@ -455,12 +447,10 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
                           else if (manu.includes('티케이엘')) modelColorClass = 'text-sky-500 dark:text-sky-400';
                           else if (manu.includes('미쓰비시') || primaryManu.includes('후지테크')) modelColorClass = 'text-red-500 dark:text-red-400';
 
-                          // 🎨 [다크모드 완치] 특이 운행 구간일 때 고채도 퍼플 배지 시인성 확보 및 일반 명도 복구
                           const shuttleBadgeClass = !shuttle.valid
                             ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
                             : 'bg-slate-50 dark:bg-gray-700/50 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-gray-600 font-normal text-[9.5px]';
 
-                          // 🎨 [다크모드 완치] 운행중/운행정지 배지 다크모드 반전 격리 색상 동기화
                           const statusBadgeClass = ev.elvtrStts === '운행중' 
                             ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50' 
                             : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';
@@ -611,7 +601,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
             }
           });
 
-          // 🎯 마커 대량 바인딩 직후 최초 1회 선착순 500개 가드를 선제 가동합니다.
+          // 🎯 마커 대량 바인딩 직후 최초 1회 선착순 300개 가드를 선제 가동합니다.
           updateMarkerVisibility();
 
           if (pendingFocusRef.current && mapInstanceRef.current && isCurrent) {
@@ -646,9 +636,10 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
   return (
     <div ref={wrapperRef} className={`w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-2 shadow-sm relative ${isFullscreen ? 'fixed inset-0 z-50 rounded-none p-0 border-0 flex flex-col' : ''}`}>
       <div ref={mapContainerRef} className={`w-full rounded-xl bg-gray-50 dark:bg-gray-700 relative z-0 ${isFullscreen ? 'flex-1 rounded-none' : ''}`} style={isFullscreen ? { width: '100%', height: '100%' } : { width: '100%', height: '540px' }} />
+      {/* 🎯 [완치] 전체화면 단추가 카카오 기본 컨트롤러와 절대 겹치지 않도록 왼쪽 위 구석(top-4 left-4)으로 완전 격리 정착시켰습니다. */}
       <button
         onClick={toggleFullscreen}
-        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 right-4"
+        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 left-4"
         title={isFullscreen ? '전체화면 종료' : '전체화면'}
       >
         {isFullscreen ? <Minimize size={16} className="text-gray-700 dark:text-gray-300" /> : <Maximize size={16} className="text-gray-700 dark:text-gray-300" />}

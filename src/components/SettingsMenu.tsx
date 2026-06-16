@@ -389,7 +389,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" data-settings-menu onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[200] flex flex-col" data-settings-menu onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm dark:bg-black/60" onClick={onClose} />
       <div className="relative mt-auto bg-white dark:bg-gray-900 rounded-t-3xl max-h-[85vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-center pt-3 pb-1">

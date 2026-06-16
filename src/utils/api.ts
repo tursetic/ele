@@ -36,6 +36,8 @@ function parseElevatorItem(item: Element): Elevator {
     buldNm: getText(item, 'buldNm'),
     address1: getText(item, 'address1'),
     address2: getText(item, 'address2'),
+    buldMgtNo1: getText(item, 'buldMgtNo1'),
+    buldMgtNo2: getText(item, 'buldMgtNo2'),
     elvtrDivNm: getText(item, 'elvtrDivNm'),
     elvtrFormNm: getText(item, 'elvtrFormNm'),
     elvtrKindNm: getText(item, 'elvtrKindNm'),

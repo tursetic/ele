@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ensureKakaoReady, fetchEleBuildings, EleBuildingFeature } from '../utils/api';
 import { searchByAddress } from '../utils/api';
 import { sortElevators, assignBadges, formatRatedSpeed, checkShuttleSection, formatDate } from '../utils/elevatorHelpers';
-import { Maximize, Minimize, Loader2 } from 'lucide-react';
+import { Maximize, Minimize, Loader2, Navigation } from 'lucide-react';
 import { ElevatorWithBadges, SettingsFields } from '../types';
 import { removeBookmark } from '../utils/bookmarks';
 
@@ -15,6 +15,16 @@ interface BuildingLayerMapProps {
   viewedIds?: Set<string>;
   onBookmarkChange?: () => void;
   onShowBookmarkPicker?: (elevator: ElevatorWithBadges) => void;
+}
+
+// 🎯 과거 데이터 유실 복구를 위한 텍스트 백업 대조 키 생성기
+function getBuildingTextKey(buldNm: string, address: string): string {
+  const cleanBuld = (buldNm || '').trim().replace(/\s+/g, '');
+  const cleanAddr = (address || '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  return `${cleanBuld}_${cleanAddr}`;
 }
 
 export default function BuildingLayerMap({
@@ -32,7 +42,13 @@ export default function BuildingLayerMap({
   const customMarkersRef = useRef<any[]>([]);
   const previewOverlaysRef = useRef<any[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const currentLocationOverlayRef = useRef<any>(null); 
   
+  // 🎯 [실시간 동기화 치트키] 팝업 내부에서 실시간 로드된 승강기 번호와 건물관리번호를 엮어 보관하는 메모리 맵
+  const elvToBuildingKeyMapRef = useRef<Map<string, string>>(new Map());
+  // 🎯 수집된 기하학 피처 데이터를 보관하여 API 재요청 없이 마커를 즉시 새로 그릴 수 있게 돕는 공간
+  const fetchedFeaturesRef = useRef<EleBuildingFeature[]>([]);
+
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [zoomTooHigh, setZoomTooHigh] = useState(false);
@@ -50,6 +66,7 @@ export default function BuildingLayerMap({
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
+      if (currentLocationOverlayRef.current) currentLocationOverlayRef.current.setMap(null);
     };
   }, []);
 
@@ -65,6 +82,439 @@ export default function BuildingLayerMap({
       wrapperRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  };
+
+  // 🎯 기기 로컬 저장소 전체를 파싱하여 고유 관리번호셋을 필터 바인딩합니다.
+  const { bookmarkedMgtKeys, viewedMgtKeys, bookmarkedTextKeys, viewedTextKeys } = useMemo(() => {
+    const bMgt = new Set<string>();
+    const vMgt = new Set<string>();
+    const bText = new Set<string>();
+    const vText = new Set<string>();
+    
+    const cleanBookmarkedIds = new Set(Array.from(bookmarkedIds).map(id => id.toString().trim()));
+    const cleanViewedIds = new Set(Array.from(viewedIds).map(id => id.toString().trim()));
+
+    try {
+      // 1. 기존 방문 히스토리 파싱 대조
+      const stored = localStorage.getItem('elevatorViewHistory');
+      if (stored) {
+        const history = JSON.parse(stored) as any[];
+        history.forEach((entry) => {
+          if (!entry) return;
+          const targetData = entry.elevatorData || entry.elevator || entry;
+          const m1 = targetData.buldMgtNo1;
+          const m2 = targetData.buldMgtNo2;
+          const elvNo = entry.elevatorNo || targetData.elevatorNo;
+          
+          const buldNm = targetData.buldNm || entry.buldNm || '';
+          const addr = targetData.address1 || targetData.address2 || entry.query || '';
+
+          if (elvNo) {
+            const cleanNo = elvNo.toString().trim();
+            if (m1 && m2) {
+              const mgtKey = `${m1.toString().trim()}_${m2.toString().trim()}`;
+              if (cleanBookmarkedIds.has(cleanNo)) bMgt.add(mgtKey);
+              if (cleanViewedIds.has(cleanNo)) vMgt.add(mgtKey);
+            }
+            if (buldNm && addr) {
+              const textKey = getBuildingTextKey(buldNm, addr);
+              if (cleanBookmarkedIds.has(cleanNo)) bText.add(textKey);
+              if (cleanViewedIds.has(cleanNo)) vText.add(textKey);
+            }
+          }
+        });
+      }
+
+      // 2. 실시간 메모리 맵 상에 로깅된 번호 가드 교차 매핑 수집
+      elvToBuildingKeyMapRef.current.forEach((mgtKey, elvNo) => {
+        if (cleanBookmarkedIds.has(elvNo)) bMgt.add(mgtKey);
+        if (cleanViewedIds.has(elvNo)) vMgt.add(mgtKey);
+      });
+
+    } catch (e) {
+      console.error(e);
+    }
+
+    return { 
+      bookmarkedMgtKeys: bMgt, viewedMgtKeys: vMgt,
+      bookmarkedTextKeys: bText, viewedTextKeys: vText 
+    };
+  }, [bookmarkedIds, viewedIds, visible]);
+
+  // 🎯 [완치 독립 마커 렌더러] Props가 변경되면 맵 이동 없이 실시간으로 즉시 마커 색상을 연동 교체시키는 핵심 함수
+  const renderBuildingMarkers = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map || fetchedFeaturesRef.current.length === 0) return;
+
+    // 기존 마커 잔여물 완전 청소
+    customMarkersRef.current.forEach(m => m.setMap(null));
+    customMarkersRef.current = [];
+
+    const level = map.getLevel();
+    const coordinateGroups: Record<string, EleBuildingFeature[]> = {};
+
+    fetchedFeaturesRef.current.forEach((feat) => {
+      if (!feat?.geometry?.coordinates) return;
+      const coordKey = `${feat.geometry.coordinates[0].toFixed(6)}_${feat.geometry.coordinates[1].toFixed(6)}`;
+      if (!coordinateGroups[coordKey]) coordinateGroups[coordKey] = [];
+      coordinateGroups[coordKey].push(feat);
+    });
+
+    Object.values(coordinateGroups).forEach((groupFeatures) => {
+      const isShared = groupFeatures.length > 1;
+
+      groupFeatures.forEach((feat, index) => {
+        let lng = feat.geometry.coordinates[0];
+        let lat = feat.geometry.coordinates[1];
+
+        if (isShared) {
+          const angle = (index * 2 * Math.PI) / groupFeatures.length;
+          const radius = 0.00016 * Math.sqrt(index + 1);
+          lng += radius * Math.cos(angle);
+          lat += radius * Math.sin(angle) * 0.78;
+        }
+
+        const markerPosition = new kakao.maps.LatLng(lat, lng);
+        const buildingNameRaw = feat.properties.BULD_NM ? feat.properties.BULD_NM.trim() : '';
+        const buildingAddressRaw = feat.properties.ADDRESS ? feat.properties.ADDRESS.trim() : '';
+        const buildingId = `${buildingNameRaw}_${buildingAddressRaw}`;
+
+        const m1 = feat.properties.BULD_MGT_NO1 ? feat.properties.BULD_MGT_NO1.toString().trim() : '';
+        const m2 = feat.properties.BULD_MGT_NO2 ? feat.properties.BULD_MGT_NO2.toString().trim() : '';
+        const currentMgtKey = `${m1}_${m2}`;
+        const currentTextKey = getBuildingTextKey(buildingNameRaw, buildingAddressRaw);
+
+        const isBuldBookmarked = bookmarkedMgtKeys.has(currentMgtKey) || bookmarkedTextKeys.has(currentTextKey);
+        const isBuldViewed = viewedMgtKeys.has(currentMgtKey) || viewedTextKeys.has(currentTextKey);
+
+        let markerColorClass = 'bg-blue-600 border-white text-white';
+        if (isBuldBookmarked) {
+          markerColorClass = 'bg-yellow-500 border-yellow-300 text-white';
+        } else if (isBuldViewed) {
+          markerColorClass = 'bg-slate-400 dark:bg-gray-500 border-white text-white';
+        }
+
+        const markerElement = document.createElement('div');
+        markerElement.className = 'cursor-pointer transform hover:scale-110 transition-transform active:scale-95';
+        
+        if (level >= 3) {
+          markerElement.innerHTML = `
+            <div class="${markerColorClass} text-[10px] font-black w-5 h-5 rounded-full shadow-md border flex items-center justify-center tracking-tight">
+              ${feat.properties.ELVTR_CNT}
+            </div>
+          `;
+        } else {
+          markerElement.innerHTML = `
+            <div class="flex flex-col items-center">
+              <div class="${markerColorClass} text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-md border flex items-center justify-center min-w-[28px] h-5 whitespace-nowrap gap-0.5 tracking-tight">
+                <span class="max-w-[65px] truncate text-[9px] font-bold">${feat.properties.BULD_NM}</span>
+                <span class="bg-white text-blue-600 font-black px-0.5 rounded-sm text-[9.5px] h-3.5 flex items-center justify-center min-w-[11px]">${feat.properties.ELVTR_CNT}</span>
+              </div>
+              <div class="w-1 h-1 ${markerColorClass.split(' ')[0]} rotate-45 -mt-0.5 shadow-sm"></div>
+            </div>
+          `;
+        }
+
+        const customMarkerOverlay = new kakao.maps.CustomOverlay({
+          position: markerPosition,
+          content: markerElement,
+          yAnchor: level >= 3 ? 0.5 : 1.0,
+        });
+
+        markerElement.onclick = async (e) => {
+          e.stopPropagation();
+          closeAllPreviews();
+          onLoadingStateChange(true);
+
+          const addrRaw = feat.properties.ADDRESS || '';
+          const addrParts = addrRaw.split(/\s+/).filter(Boolean);
+          const sidoParam = addrParts[0] || undefined;
+          const sigunguParam = addrParts[1] || undefined;
+          const requestedRows = feat.properties.ELVTR_CNT ? feat.properties.ELVTR_CNT + 20 : 100;
+
+          try {
+            const res = await searchByAddress({
+              sido: sidoParam,
+              sigungu: sigunguParam,
+              buldNm: buildingNameRaw,
+              pageNo: 1,
+              ...({ numOfRows: requestedRows.toString() } as any)
+            });
+            
+            if (res.items && res.items.length > 0) {
+              const targetM1 = (feat.properties.BULD_MGT_NO1 || '').toString().trim();
+              const targetM2 = (feat.properties.BULD_MGT_NO2 || '').toString().trim();
+
+              // 실시간 메모리 동기화용 맵 데이터 누적 기동
+              res.items.forEach((item: any) => {
+                const itemM1 = (item.buldMgtNo1 || '').toString().trim();
+                const itemM2 = (item.buldMgtNo2 || '').toString().trim();
+                const itemNo = item.elevatorNo ? item.elevatorNo.toString().trim() : '';
+                if (itemM1 && itemM2 && itemNo) {
+                  elvToBuildingKeyMapRef.current.set(itemNo, `${itemM1}_${itemM2}`);
+                }
+              });
+
+              const filteredItems = res.items.filter((item: any) => {
+                const itemM1 = (item.buldMgtNo1 || '').toString().trim();
+                const itemM2 = (item.buldMgtNo2 || '').toString().trim();
+                if (!itemM1 && !itemM2) {
+                  return (item.buldNm || '').trim() === buildingNameRaw;
+                }
+                return itemM1 === targetM1 && itemM2 === targetM2;
+              });
+
+              if (filteredItems.length > 0) {
+                const sorted = sortElevators(filteredItems);
+                const withBadges = assignBadges(sorted);
+                
+                const gMax = Math.max(...withBadges.map(ev => parseInt(ev.divGroundFloorCnt, 10) || 0));
+                const uMax = Math.max(...withBadges.map(ev => parseInt(ev.divUndgrndFloorCnt, 10) || 0));
+                
+                const enhanced: ElevatorWithBadges[] = withBadges.map(ev => ({
+                  ...ev,
+                  buildingMaxGround: gMax,
+                  buildingMaxUnderground: uMax,
+                }));
+
+                activeOverlayBuldIdRef.current = buildingId;
+
+                const rowsHtml = enhanced.map((ev, idx) => {
+                  const shuttle = checkShuttleSection(ev.shuttleSection);
+                  const displaySpeed = formatRatedSpeed(ev.ratedSpeed);
+                  const displayLoad = ev.liveLoad ? String(ev.liveLoad).replace(/kg/gi, '').trim() + ' kg' : '';
+                  const asignNo = (ev.elvtrAsignNo || '').trim().replace(/호기$|호$/, '');
+                  const displayAsign = asignNo ? `${asignNo}호기` : `${idx + 1}호기`;
+
+                  const isOriginalMulti = enhanced.length >= 2;
+                  const isTopGround = isOriginalMulti && gMax > 0 && (parseInt(ev.divGroundFloorCnt, 10) || 0) === gMax;
+                  const isDeepUnderground = isOriginalMulti && uMax > 0 && (parseInt(ev.divUndgrndFloorCnt, 10) || 0) === uMax;
+
+                  const cleanRowNo = ev.elevatorNo ? ev.elevatorNo.toString().trim() : '';
+                  const isRowBookmarked = bookmarkedIds.has(cleanRowNo);
+                  const isRowViewed = viewedIds.has(cleanRowNo);
+
+                  const rowBgClass = isRowBookmarked
+                    ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500'
+                    : isRowViewed
+                    ? 'bg-slate-50/30 dark:bg-slate-900/5 border-l-2 border-l-slate-200/50 dark:border-l-gray-700'
+                    : 'bg-white dark:bg-gray-800 border-l-2 border-l-slate-200/40 dark:border-l-gray-700/40';
+                    
+                  const rowOpacityClass = isRowViewed && !isRowBookmarked ? 'opacity-55' : '';
+
+                  let modelColorClass = 'text-[#8B4513] dark:text-[#EAA850]';
+                  const manu = ev.manufacturerName || '';
+                  if (manu.includes('현대엘')) modelColorClass = 'text-emerald-600 dark:text-emerald-400';
+                  else if (manu.includes('오티스엘')) modelColorClass = 'text-indigo-600 dark:text-indigo-400';
+                  else if (manu.includes('티케이엘')) modelColorClass = 'text-sky-500 dark:text-sky-400';
+
+                  const shuttleBadgeClass = !shuttle.valid
+                    ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
+                    : 'bg-slate-50 dark:bg-gray-700/50 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-gray-600 font-normal text-[9.5px]';
+
+                  const statusBadgeClass = ev.elvtrStts === '운행중' 
+                    ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50' 
+                    : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';
+
+                  const kindBadgeHtml = ev.elvtrKindNm
+                    ? `<span class="px-1 py-0 text-[9.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded shrink-0">${ev.elvtrKindNm}</span>`
+                    : '';
+
+                  const hasReplacement = ev.frstInstallationDe && ev.installationDe && ev.frstInstallationDe !== ev.installationDe;
+                  const dateDisplayHtml = hasReplacement
+                    ? `<span class="text-slate-600 dark:text-gray-300 font-bold bg-slate-100/80 dark:bg-gray-700/60 px-1 py-0.25 rounded">교체 ${formatDate(ev.installationDe)}</span>`
+                    : ev.installationDe ? `<span>설치 ${formatDate(ev.installationDe)}</span>` : '';
+
+                  const topGroundHtml = isTopGround ? `<span class="bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">최고층</span>` : '';
+                  const deepUndergroundHtml = isDeepUnderground ? `<span class="bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">최저층</span>` : '';
+                  const specialSectionHtml = (!shuttle.valid && ev.shuttleSection) ? `<span class="bg-purple-50/60 dark:bg-purple-950/10 text-purple-500 dark:text-purple-400 border border-purple-100/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">특이</span>` : '';
+
+                  const bookmarkIconHtml = isRowBookmarked
+                    ? `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="true" class="p-1 rounded transition-all bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 제거"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`
+                    : `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="false" class="p-1 rounded transition-all bg-gray-100/50 text-gray-400 hover:bg-200/50 hover:text-gray-600 dark:bg-gray-700/50 dark:hover:bg-gray-600/50 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 추가"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`;
+
+                  return `
+                    <div data-id="${ev.elevatorNo}" class="${rowBgClass} ${rowOpacityClass} w-full text-left flex flex-col p-1.5 rounded-lg border border-transparent cursor-pointer transition-all hover:bg-slate-50/60 dark:hover:bg-slate-700/40 space-y-0.5 relative">
+                      <div class="flex items-center justify-between gap-1.5 w-full">
+                        <div class="flex items-center gap-1 min-w-0 flex-wrap flex-1">
+                          <span class="px-1 py-0 bg-slate-50 dark:bg-gray-700/60 text-slate-500 dark:text-gray-400 text-[9px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0">${displayAsign}</span>
+                          <span class="text-[12px] font-bold text-slate-700 dark:text-gray-200 truncate max-w-[110px]">${ev.installationPlace || '위치 미기재'}</span>
+                          <span class="px-1 py-0 bg-slate-50/50 dark:bg-gray-700/40 text-slate-400 dark:text-gray-500 rounded text-[9.5px] border border-slate-200/30 dark:border-gray-600/30 font-normal shrink-0 tracking-tight">${ev.elevatorNo}</span>
+                          ${topGroundHtml}
+                          ${deepUndergroundHtml}
+                          ${specialSectionHtml}
+                        </div>
+                        <div class="shrink-0 flex items-center ml-auto">
+                          ${bookmarkIconHtml}
+                        </div>
+                      </div>
+                      <div class="space-y-0.5 w-full min-w-0">
+                        <div class="flex items-center gap-1 min-w-0 text-[13px]">
+                          <span class="text-slate-800 dark:text-gray-200 font-black tracking-tight truncate max-w-[135px] inline-block shrink-0">${ev.manufacturerName || ''}</span>
+                          ${ev.manufacturerName && ev.elvtrModel ? `<span class="text-slate-200 dark:text-gray-700 text-[10px] shrink-0 font-normal">|</span>` : ''}
+                          <span class="${modelColorClass} font-black tracking-tight truncate">${ev.elvtrModel || ''}</span>
+                        </div>
+                        <div class="flex items-center gap-1 text-[10.5px] text-slate-400 dark:text-gray-500 font-medium min-w-0 flex-wrap">
+                          <span class="px-1 py-0 rounded border shrink-0 ${shuttleBadgeClass}">${ev.shuttleSection || '전층'} 운행</span>
+                          <span class="shrink-0">${displaySpeed}</span>
+                          ${displaySpeed && displayLoad ? `<span class="text-slate-200 dark:text-gray-700 font-normal shrink-0">•</span>` : ''}
+                          <span class="shrink-0">${displayLoad}</span>
+                        </div>
+                      </div>
+                      <div class="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-50/60 dark:border-gray-700/40 w-full text-[10.5px] text-slate-400 dark:text-gray-500">
+                        <div class="flex items-center gap-1.5">
+                          <span>${dateDisplayHtml}</span>
+                          ${kindBadgeHtml}
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                          <span class="px-1.5 py-0 text-[9.5px] font-bold rounded border tracking-tight shrink-0 ${statusBadgeClass}">${ev.elvtrStts || '-'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('');
+
+                const overlayContent = document.createElement('div');
+                overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[265px] relative font-sans text-left z-[100]';
+
+                ['wheel', 'mousewheel', 'mousedown', 'touchstart', 'pointerdown', 'dblclick'].forEach(evt => {
+                  overlayContent.addEventListener(evt, (ev) => ev.stopPropagation(), { passive: true });
+                });
+
+                const cleanAddress = (feat.properties.ADDRESS || '').trim();
+
+                overlayContent.innerHTML = `
+                  <div class="flex justify-between items-start mb-1.5 pr-5">
+                    <div class="min-w-0 flex-1">
+                      <h4 class="text-[13.5px] font-bold text-gray-800 dark:text-gray-100 truncate">${feat.properties.BULD_NM}</h4>
+                      <p class="text-[10.5px] text-slate-400 dark:text-gray-400 mt-0.5 font-normal truncate">${cleanAddress}</p>
+                    </div>
+                  </div>
+                  <div class="max-h-[185px] overflow-y-auto space-y-1 pr-0.5" style="scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
+                    <div class="space-y-1">
+                      ${rowsHtml}
+                    </div>
+                  </div>
+                `;
+
+                const closeBtn = document.createElement('button');
+                closeBtn.className = 'absolute top-2.5 right-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors focus:outline-none';
+                closeBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+
+                const previewOverlay = new kakao.maps.CustomOverlay({ 
+                  content: overlayContent, 
+                  position: markerPosition, 
+                  yAnchor: 1.12,
+                  zIndex: 60 
+                });
+
+                closeBtn.onclick = (ev) => {
+                  ev.stopPropagation();
+                  previewOverlay.setMap(null);
+                  if (activeOverlayBuldIdRef.current === buildingId) {
+                    activeOverlayBuldIdRef.current = null;
+                  }
+                };
+                overlayContent.appendChild(closeBtn);
+
+                overlayContent.addEventListener('click', async (ev) => {
+                  const target = ev.target as HTMLElement;
+                  
+                  const bookmarkBtn = target.closest('[data-bookmark]');
+                  if (bookmarkBtn) {
+                    ev.stopPropagation();
+                    const elvNo = bookmarkBtn.getAttribute('data-bookmark');
+                    const isBookmarked = bookmarkBtn.getAttribute('data-bookmarked') === 'true';
+                    if (elvNo) {
+                      if (isBookmarked) {
+                        await removeBookmark(elvNo);
+                        window.dispatchEvent(new Event('bookmarksUpdated'));
+                        if (onBookmarkChange) onBookmarkChange();
+                      } else {
+                        const found = enhanced.find(item => item.elevatorNo === elvNo);
+                        if (found && onShowBookmarkPicker) {
+                          onShowBookmarkPicker(found);
+                        }
+                      }
+                    }
+                    return;
+                  }
+
+                  const rowClickable = target.closest('[data-id]');
+                  if (rowClickable) {
+                    const elvNo = rowClickable.getAttribute('data-id');
+                    const found = enhanced.find(item => item.elevatorNo === elvNo);
+                    if (found) {
+                      onBuildingSelect([found], true);
+                    }
+                  }
+                });
+
+                previewOverlay.setMap(mapInstanceRef.current);
+                previewOverlaysRef.current.push(previewOverlay);
+              }
+            }
+          } catch (err) {
+            console.error(err);
+          } finally {
+            onLoadingStateChange(false);
+          }
+        };
+
+        customMarkerOverlay.setMap(map);
+        customMarkersRef.current.push(customMarkerOverlay);
+      });
+    });
+  }, [bookmarkedMgtKeys, viewedMgtKeys, bookmarkedTextKeys, viewedTextKeys, bookmarkedIds, viewedIds, onBookmarkChange, onShowBookmarkPicker, onBuildingSelect, onLoadingStateChange]);
+
+  // 🎯 [완치 렌더 트래커] 상위 컴포넌트나 리액트 Props 상태가 변하면, 무조건 맵 위에 마커들을 실시간으로 리렌더링 발동시킵니다.
+  useEffect(() => {
+    if (mapInstanceRef.current && fetchedFeaturesRef.current.length > 0) {
+      renderBuildingMarkers();
+    }
+  }, [bookmarkedMgtKeys, viewedMgtKeys, renderBuildingMarkers]);
+
+  const handleMoveToCurrentLocation = () => {
+    if (!mapInstanceRef.current) return;
+    
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const kakao = (window as any).kakao;
+          const currentLoc = new kakao.maps.LatLng(lat, lng);
+          
+          mapInstanceRef.current.panTo(currentLoc);
+
+          if (currentLocationOverlayRef.current) {
+            currentLocationOverlayRef.current.setMap(null);
+          }
+
+          const myLocElement = document.createElement('div');
+          myLocElement.className = 'relative flex h-4 w-4 items-center justify-center';
+          myLocElement.innerHTML = `
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-blue-600 border-2 border-white shadow-md"></span>
+          `;
+
+          const myLocOverlay = new kakao.maps.CustomOverlay({
+            position: currentLoc,
+            content: myLocElement,
+            xAnchor: 0.5,
+            yAnchor: 0.5,
+            zIndex: 99
+          });
+
+          myLocOverlay.setMap(mapInstanceRef.current);
+          currentLocationOverlayRef.current = myLocOverlay;
+        },
+        (err) => {
+          console.error('[Geolocation Error]', err);
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
     }
   };
 
@@ -105,7 +555,6 @@ export default function BuildingLayerMap({
 
         if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
 
-        // 🎯 500ms 디바운스 고정 결합
         debounceTimeoutRef.current = setTimeout(async () => {
           const controller = new AbortController();
           abortControllerRef.current = controller;
@@ -170,289 +619,11 @@ export default function BuildingLayerMap({
             
             cachedBoundsRef.current = expandedBounds;
             
-            customMarkersRef.current.forEach(m => m.setMap(null));
-            customMarkersRef.current = [];
+            // 🎯 피처 저장소 업데이트 후 렌더러 즉시 기동
+            fetchedFeaturesRef.current = features;
+            renderBuildingMarkers();
 
-            const coordinateGroups: Record<string, EleBuildingFeature[]> = {};
-            features.forEach((feat) => {
-              const coordKey = `${feat.geometry.coordinates[0].toFixed(6)}_${feat.geometry.coordinates[1].toFixed(6)}`;
-              if (!coordinateGroups[coordKey]) coordinateGroups[coordKey] = [];
-              coordinateGroups[coordKey].push(feat);
-            });
-
-            let activeOverlayStillExists = false;
-
-            Object.values(coordinateGroups).forEach((groupFeatures) => {
-              const isShared = groupFeatures.length > 1;
-
-              groupFeatures.forEach((feat, index) => {
-                let lng = feat.geometry.coordinates[0];
-                let lat = feat.geometry.coordinates[1];
-
-                if (isShared) {
-                  const angle = (index * 2 * Math.PI) / groupFeatures.length;
-                  const radius = 0.00016 * Math.sqrt(index + 1);
-                  lng += radius * Math.cos(angle);
-                  lat += radius * Math.sin(angle) * 0.78;
-                }
-
-                const markerPosition = new kakao.maps.LatLng(lat, lng);
-                const buildingId = `${feat.properties.BULD_NM.trim()}_${feat.properties.ADDRESS.trim()}`;
-                
-                if (activeOverlayBuldIdRef.current === buildingId) {
-                  activeOverlayStillExists = true;
-                }
-
-                const markerElement = document.createElement('div');
-                markerElement.className = 'cursor-pointer transform hover:scale-110 transition-transform active:scale-95';
-                
-                if (level >= 3) {
-                  markerElement.innerHTML = `
-                    <div class="bg-blue-600 text-white text-[10px] font-black w-5 h-5 rounded-full shadow-md border border-white flex items-center justify-center tracking-tight">
-                      ${feat.properties.ELVTR_CNT}
-                    </div>
-                  `;
-                } else {
-                  markerElement.innerHTML = `
-                    <div class="flex flex-col items-center">
-                      <div class="bg-blue-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-md border border-white flex items-center justify-center min-w-[28px] h-5 whitespace-nowrap gap-0.5 tracking-tight">
-                        <span class="max-w-[65px] truncate text-[9px] font-bold">${feat.properties.BULD_NM}</span>
-                        <span class="bg-white text-blue-600 font-black px-0.5 rounded-sm text-[9.5px] h-3.5 flex items-center justify-center min-w-[11px]">${feat.properties.ELVTR_CNT}</span>
-                      </div>
-                      <div class="w-1 h-1 bg-blue-600 rotate-45 -mt-0.5 shadow-sm"></div>
-                    </div>
-                  `;
-                }
-
-                const customMarkerOverlay = new kakao.maps.CustomOverlay({
-                  position: markerPosition,
-                  content: markerElement,
-                  yAnchor: level >= 3 ? 0.5 : 1.0,
-                });
-
-                markerElement.onclick = async (e) => {
-                  e.stopPropagation();
-                  closeAllPreviews();
-                  onLoadingStateChange(true);
-
-                  const addrRaw = feat.properties.ADDRESS || '';
-                  const addrParts = addrRaw.split(/\s+/).filter(Boolean);
-                  const sidoParam = addrParts[0] || undefined;
-                  const sigunguParam = addrParts[1] || undefined;
-                  const requestedRows = feat.properties.ELVTR_CNT ? feat.properties.ELVTR_CNT + 20 : 100;
-
-                  try {
-                    const res = await searchByAddress({
-                      sido: sidoParam,
-                      sigungu: sigunguParam,
-                      buldNm: feat.properties.BULD_NM.trim(),
-                      pageNo: 1,
-                      ...({ numOfRows: requestedRows.toString() } as any)
-                    });
-                    
-                    if (res.items.length > 0) {
-                      const sorted = sortElevators(res.items);
-                      const withBadges = assignBadges(sorted);
-                      
-                      const gMax = Math.max(...withBadges.map(ev => parseInt(ev.divGroundFloorCnt, 10) || 0));
-                      const uMax = Math.max(...withBadges.map(ev => parseInt(ev.divUndgrndFloorCnt, 10) || 0));
-                      
-                      const enhanced: ElevatorWithBadges[] = withBadges.map(ev => ({
-                        ...ev,
-                        buildingMaxGround: gMax,
-                        buildingMaxUnderground: uMax,
-                      }));
-
-                      activeOverlayBuldIdRef.current = buildingId;
-
-                      const overlayContent = document.createElement('div');
-                      overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[265px] relative font-sans text-left z-[100]';
-
-                      ['wheel', 'mousewheel', 'mousedown', 'touchstart', 'pointerdown', 'dblclick'].forEach(evt => {
-                        overlayContent.addEventListener(evt, (ev) => ev.stopPropagation(), { passive: true });
-                      });
-
-                      const cleanAddress = (feat.properties.ADDRESS || '').trim();
-
-                      overlayContent.innerHTML = `
-                        <div class="flex justify-between items-start mb-1.5 pr-5">
-                          <div class="min-w-0 flex-1">
-                            <h4 class="text-[13.5px] font-bold text-gray-800 dark:text-gray-100 truncate">${feat.properties.BULD_NM}</h4>
-                            <p class="text-[10.5px] text-slate-400 dark:text-gray-400 mt-0.5 font-normal truncate">${cleanAddress}</p>
-                          </div>
-                        </div>
-                        <div class="max-h-[185px] overflow-y-auto space-y-1 pr-0.5" style="scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
-                          <div class="space-y-1">
-                            ${enhanced.map((ev, idx) => {
-                              const shuttle = checkShuttleSection(ev.shuttleSection);
-                              const displaySpeed = formatRatedSpeed(ev.ratedSpeed);
-                              const displayLoad = ev.liveLoad ? String(ev.liveLoad).replace(/kg/gi, '').trim() + ' kg' : '';
-                              const asignNo = (ev.elvtrAsignNo || '').trim().replace(/호기$|호$/, '');
-                              const displayAsign = asignNo ? `${asignNo}호기` : `${idx + 1}호기`;
-
-                              const isMultiElevator = enhanced.length >= 2;
-                              const isTopGround = isMultiElevator && gMax > 0 && (parseInt(ev.divGroundFloorCnt, 10) || 0) === gMax;
-                              const isDeepUnderground = isMultiElevator && uMax > 0 && (parseInt(ev.divUndgrndFloorCnt, 10) || 0) === uMax;
-
-                              const isRowBookmarked = bookmarkedIds.has(ev.elevatorNo);
-                              const isRowViewed = viewedIds.has(ev.elevatorNo);
-
-                              const rowBgClass = isRowBookmarked
-                                ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500'
-                                : isRowViewed
-                                ? 'bg-slate-50/30 dark:bg-slate-900/5 border-l-2 border-l-slate-200/50 dark:border-l-gray-700'
-                                : 'bg-white dark:bg-gray-800 border-l-2 border-l-slate-200/40 dark:border-l-gray-700/40';
-                                
-                              const rowOpacityClass = isRowViewed && !isRowBookmarked ? 'opacity-55' : '';
-
-                              let modelColorClass = 'text-[#8B4513] dark:text-[#EAA850]';
-                              const manu = ev.manufacturerName || '';
-                              if (manu.includes('현대엘')) modelColorClass = 'text-emerald-600 dark:text-emerald-400';
-                              else if (manu.includes('오티스엘')) modelColorClass = 'text-indigo-600 dark:text-indigo-400';
-                              else if (manu.includes('티케이엘')) modelColorClass = 'text-sky-500 dark:text-sky-400';
-
-                              // 🎨 [다크모드 완치] 특이 운행 구간일 때 고채도 퍼플 배지 시인성 확보 및 일반 명도 복구
-                              const shuttleBadgeClass = !shuttle.valid
-                                ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
-                                : 'bg-slate-50 dark:bg-gray-700/50 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-gray-600 font-normal text-[9.5px]';
-
-                              // 🎨 [다크모드 완치] 운행중/운행정지 배지 다크모드 반전 격리 색상 동기화
-                              const statusBadgeClass = ev.elvtrStts === '운행중' 
-                                ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50' 
-                                : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';
-
-                              const kindBadgeHtml = ev.elvtrKindNm
-                                ? `<span class="px-1 py-0 text-[9.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded shrink-0">${ev.elvtrKindNm}</span>`
-                                : '';
-
-                              // 🎨 [다크모드 완치] 설치 일자 글자 깨짐 방조 코드 교정
-                              const hasReplacement = ev.frstInstallationDe && ev.installationDe && ev.frstInstallationDe !== ev.installationDe;
-                              const dateDisplayHtml = hasReplacement
-                                ? `<span class="text-slate-600 dark:text-gray-300 font-bold bg-slate-100/80 dark:bg-gray-700/60 px-1 py-0.25 rounded">교체 ${formatDate(ev.installationDe)}</span>`
-                                : ev.installationDe ? `<span>설치 ${formatDate(ev.installationDe)}</span>` : '';
-
-                              const topGroundHtml = isTopGround ? `<span class="bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">최고층</span>` : '';
-                              const deepUndergroundHtml = isDeepUnderground ? `<span class="bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">최저층</span>` : '';
-                              const specialSectionHtml = (!shuttle.valid && ev.shuttleSection) ? `<span class="bg-purple-50/60 dark:bg-purple-950/10 text-purple-500 dark:text-purple-400 border border-purple-100/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">특이</span>` : '';
-
-                              const bookmarkIconHtml = isRowBookmarked
-                                ? `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="true" class="p-1 rounded transition-all bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 제거"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`
-                                : `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="false" class="p-1 rounded transition-all bg-gray-100/50 text-gray-400 hover:bg-gray-200/50 hover:text-gray-600 dark:bg-gray-700/50 dark:hover:bg-gray-600/50 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 추가"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`;
-
-                              return `
-                                <div data-id="${ev.elevatorNo}" class="${rowBgClass} ${rowOpacityClass} w-full text-left flex flex-col p-1.5 rounded-lg border border-transparent cursor-pointer transition-all hover:bg-slate-50/60 dark:hover:bg-slate-700/40 space-y-0.5 relative">
-                                  <div class="flex items-center justify-between gap-1.5 w-full">
-                                    <div class="flex items-center gap-1 min-w-0 flex-wrap flex-1">
-                                      <span class="px-1 py-0 bg-slate-50 dark:bg-gray-700/60 text-slate-500 dark:text-gray-400 text-[9px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0">${displayAsign}</span>
-                                      <span class="text-[12px] font-bold text-slate-700 dark:text-gray-200 truncate max-w-[110px]">${ev.installationPlace || '위치 미기재'}</span>
-                                      <span class="px-1 py-0 bg-slate-50/50 dark:bg-gray-700/40 text-slate-400 dark:text-gray-500 rounded text-[9.5px] border border-slate-200/30 dark:border-gray-600/30 font-normal shrink-0 tracking-tight">${ev.elevatorNo}</span>
-                                      ${topGroundHtml}
-                                      ${deepUndergroundHtml}
-                                      ${specialSectionHtml}
-                                    </div>
-                                    <div class="shrink-0 flex items-center ml-auto">
-                                      ${bookmarkIconHtml}
-                                    </div>
-                                  </div>
-                                  <div class="space-y-0.5 w-full min-w-0">
-                                    <div class="flex items-center gap-1 min-w-0 text-[13px]">
-                                      <span class="text-slate-800 dark:text-gray-200 font-black tracking-tight truncate max-w-[135px] inline-block shrink-0">${ev.manufacturerName}</span>
-                                      ${ev.manufacturerName && ev.elvtrModel ? `<span class="text-slate-200 dark:text-gray-700 text-[10px] shrink-0 font-normal">|</span>` : ''}
-                                      <span class="${modelColorClass} font-black tracking-tight truncate">${ev.elvtrModel}</span>
-                                    </div>
-                                    <div class="flex items-center gap-1 text-[10.5px] text-slate-400 dark:text-gray-500 font-medium min-w-0 flex-wrap">
-                                      <span class="px-1 py-0 rounded border shrink-0 ${shuttleBadgeClass}">${ev.shuttleSection || '전층'} 운행</span>
-                                      <span class="shrink-0">${displaySpeed}</span>
-                                      ${displaySpeed && displayLoad ? `<span class="text-slate-200 dark:text-gray-700 font-normal shrink-0">•</span>` : ''}
-                                      <span class="shrink-0">${displayLoad}</span>
-                                    </div>
-                                  </div>
-                                  <div class="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-50/60 dark:border-gray-700/40 w-full text-[10.5px] text-slate-400 dark:text-gray-500">
-                                    <div class="flex items-center gap-1.5">
-                                      <span>${dateDisplayHtml}</span>
-                                      ${kindBadgeHtml}
-                                    </div>
-                                    <div class="flex items-center gap-1 shrink-0">
-                                      <span class="px-1.5 py-0 text-[9.5px] font-bold rounded border tracking-tight shrink-0 ${statusBadgeClass}">${ev.elvtrStts || '-'}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              `;
-                            }).join('')}
-                          </div>
-                        </div>
-                      `;
-
-                      const closeBtn = document.createElement('button');
-                      closeBtn.className = 'absolute top-2.5 right-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors focus:outline-none';
-                      closeBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-
-                      const previewOverlay = new kakao.maps.CustomOverlay({ 
-                        content: overlayContent, 
-                        position: markerPosition, 
-                        yAnchor: 1.12,
-                        zIndex: 60 
-                      });
-
-                      closeBtn.onclick = (ev) => {
-                        ev.stopPropagation();
-                        previewOverlay.setMap(null);
-                        if (activeOverlayBuldIdRef.current === buildingId) {
-                          activeOverlayBuldIdRef.current = null;
-                        }
-                      };
-                      overlayContent.appendChild(closeBtn);
-
-                      overlayContent.addEventListener('click', async (ev) => {
-                        const target = ev.target as HTMLElement;
-                        
-                        const bookmarkBtn = target.closest('[data-bookmark]');
-                        if (bookmarkBtn) {
-                          ev.stopPropagation();
-                          const elvNo = bookmarkBtn.getAttribute('data-bookmark');
-                          const isBookmarked = bookmarkBtn.getAttribute('data-bookmarked') === 'true';
-                          if (elvNo) {
-                            if (isBookmarked) {
-                              await removeBookmark(elvNo);
-                              window.dispatchEvent(new Event('bookmarksUpdated'));
-                              if (onBookmarkChange) onBookmarkChange();
-                            } else {
-                              const found = enhanced.find(item => item.elevatorNo === elvNo);
-                              if (found && onShowBookmarkPicker) {
-                                onShowBookmarkPicker(found);
-                              }
-                            }
-                          }
-                          return;
-                        }
-
-                        const rowClickable = target.closest('[data-id]');
-                        if (rowClickable) {
-                          const elvNo = rowClickable.getAttribute('data-id');
-                          const found = enhanced.find(item => item.elevatorNo === elvNo);
-                          if (found) {
-                            onBuildingSelect([found], true);
-                          }
-                        }
-                      });
-
-                      previewOverlay.setMap(mapInstanceRef.current);
-                      previewOverlaysRef.current.push(previewOverlay);
-                    }
-                  } catch (err) {
-                    console.error(err);
-                  } finally {
-                    // 철저 교정 마감
-                    onLoadingStateChange(false);
-                  }
-                };
-
-                customMarkerOverlay.setMap(map);
-                customMarkersRef.current.push(customMarkerOverlay);
-              });
-            });
-
-            if (!activeOverlayStillExists) {
+            if (!activeOverlayBuldIdRef.current) {
               closeAllPreviews();
             }
 
@@ -468,7 +639,7 @@ export default function BuildingLayerMap({
     }
 
     initMap();
-  }, [onBuildingSelect, onLoadingStateChange, settings, bookmarkedIds, viewedIds, onBookmarkChange, onShowBookmarkPicker]);
+  }, [renderBuildingMarkers]);
 
   return (
     <div ref={wrapperRef} className={`w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-2 shadow-sm relative ${isFullscreen ? 'fixed inset-0 z-50 rounded-none p-0 border-0 flex flex-col' : ''}`}>
@@ -484,16 +655,26 @@ export default function BuildingLayerMap({
 
       <button
         onClick={toggleFullscreen}
-        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 right-4"
+        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 left-4 focus:outline-none flex items-center justify-center"
       >
         {isFullscreen ? <Minimize size={16} className="text-gray-700 dark:text-gray-300" /> : <Maximize size={16} className="text-gray-700 dark:text-gray-300" />}
       </button>
+
       {scanning && !zoomTooHigh && (
-        <div className="absolute top-4 left-4 z-20 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-1.5 shadow-sm">
+        <div className="absolute top-4 left-[60px] z-20 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-1.5 shadow-sm">
           <Loader2 size={12} className="animate-spin text-blue-500" />
           <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300">반경 승강기 스캔 중...</span>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={handleMoveToCurrentLocation}
+        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 active:scale-95 transition-all bottom-4 right-4 focus:outline-none flex items-center justify-center w-8 h-8"
+        title="현재 위치로 이동"
+      >
+        <Navigation size={15} className="text-blue-600 dark:text-blue-400 fill-current" />
+      </button>
     </div>
   );
 }

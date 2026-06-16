@@ -311,19 +311,21 @@ export default function FilterSidebar({
 
         <div className="overflow-y-auto flex-1 py-1 bg-white dark:bg-gray-800" style={{ scrollbarWidth: 'thin' }}>
           
-          {/* 🎯 [스위치 복완] 꼬여서 증발했던 Tailwind flex 구조 및 노브 마진을 완벽하게 재건하여 복구 완료 */}
-          <div className="border-b border-gray-100 dark:border-gray-700/70 px-4 py-3 flex items-center justify-between">
-            <span className="text-[12px] font-bold text-gray-800 dark:text-gray-200">에스컬레이터 · 무빙워크 숨김</span>
+          {/* 🎯 [완치] 존재하지 않는 h-4.5를 파괴하고 표준 규격 우회 회로로 스위치 형태를 완벽 복구합니다. */}
+          <div className="border-b border-gray-100 dark:border-gray-700/70 px-4 py-3 flex items-center justify-between gap-2 bg-white dark:bg-gray-800">
+            <span className="text-[12px] font-bold text-gray-800 dark:text-gray-200">
+              에스컬레이터 · 무빙워크 숨김
+            </span>
             <button
               type="button"
               onClick={() => onHideEscalatorChange(!hideEscalator)}
-              className={`w-8 h-4.5 rounded-full transition-colors relative shrink-0 focus:outline-none ${
+              className={`w-9 h-5 rounded-full transition-colors relative shrink-0 focus:outline-none ${
                 hideEscalator ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
               }`}
             >
               <div
-                className={`absolute top-0.5 w-3.5 h-3.5 bg-white rounded-full shadow-md transition-transform ${
-                  hideEscalator ? 'translate-x-4' : 'translate-x-0.5'
+                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${
+                  hideEscalator ? 'translate-x-4' : 'translate-x-0'
                 }`}
               />
             </button>
@@ -362,7 +364,7 @@ export default function FilterSidebar({
                         type="number"
                         value={minGroundFloor}
                         onChange={(e) => onMinGroundFloorChange(e.target.value)}
-                        placeholder="최소 지상층 지정 (이상)"
+                        placeholder="최소 지상층"
                         min="0"
                         className="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
                       />
@@ -372,7 +374,7 @@ export default function FilterSidebar({
                         type="number"
                         value={minSpeed}
                         onChange={(e) => onMinSpeedChange(e.target.value)}
-                        placeholder="최소 속도 지정 (m/min 이상)"
+                        placeholder="최소 정격 속도"
                         min="0"
                         step="0.1"
                         className="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-[11px] text-gray-800 dark:text-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition-all"
