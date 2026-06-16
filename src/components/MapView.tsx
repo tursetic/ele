@@ -252,21 +252,20 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
           // Don't setBounds here - let external setMapState handle it if needed
         }
 
-        if (isNewMap && !hasSetBoundsRef.current && !restoreMode) {
-          // Only set bounds if it's truly a fresh map with new search results
-          // Check if we need to set initial bounds (no external state restoration)
-          setTimeout(() => {
-            if (mapInstanceRef.current && isCurrent && !mapKeyChanged) {
-              mapInstanceRef.current.relayout();
-              mapInstanceRef.current.setBounds(bounds);
-              hasSetBoundsRef.current = true;
-            }
-          }, 150);
-        } else if (!isNewMap && shouldRedrawMarkers && geoGroupsChanged && !restoreMode) {
-          // Existing map with new data - update bounds
+        // 새로운 지도이고 restoreMode가 아닐 때만 bounds 설정
+        if (isNewMap && !restoreMode) {
           setTimeout(() => {
             if (mapInstanceRef.current && isCurrent) {
               mapInstanceRef.current.relayout();
+              mapInstanceRef.current.setBounds(bounds);
+            }
+          }, 150);
+        } else if (!isNewMap && geoGroupsChanged && !restoreMode) {
+          // 기존 지도에 새 데이터 - bounds 업데이트
+          setTimeout(() => {
+            if (mapInstanceRef.current && isCurrent) {
+              mapInstanceRef.current.relayout();
+              mapInstanceRef.current.setBounds(bounds);
             }
           }, 50);
         }
@@ -349,7 +348,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
             const isMultiBuilding = bldgEntries.length > 1;
 
             const overlayContent = document.createElement('div');
-            overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[285px] relative font-sans';
+            overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[256px] relative font-sans';
 
             const blockMapInteractions = (e: Event) => { e.stopPropagation(); };
             ['wheel', 'mousewheel', 'DOMMouseScroll', 'mousedown', 'touchstart', 'pointerdown', 'dblclick'].forEach(evt => {
@@ -476,9 +475,11 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
                               </div>
 
                               <div class="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-50/60 dark:border-gray-700/40 w-full text-[10.5px] text-slate-400 dark:text-gray-500">
-                                <span>${dateDisplayHtml}</span>
-                                <div class="flex items-center gap-1 shrink-0 ml-auto">
+                                <div class="flex items-center gap-1.5">
+                                  <span>${dateDisplayHtml}</span>
                                   ${kindBadgeHtml}
+                                </div>
+                                <div class="flex items-center gap-1 shrink-0">
                                   <span class="px-1.5 py-0 text-[9.5px] font-bold rounded border tracking-tight shrink-0 ${statusBadgeClass}">${ev.elvtrStts || '-'}</span>
                                 </div>
                               </div>

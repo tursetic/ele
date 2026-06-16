@@ -94,7 +94,7 @@ export default function ElevatorCard({
               {address}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0 z-10" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
             <BookmarkButton elevator={el} bookmarkedIds={bookmarkedIds} />
           </div>
         </div>
@@ -118,11 +118,13 @@ export default function ElevatorCard({
 
         {/* 하단선 및 배지 마감구역: 🎯 [초밀착] 상하 여백 압축 */}
         <div className="flex items-center justify-between gap-2 pt-1 mt-1 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
-          <div className="text-[11.5px] text-slate-400 dark:text-gray-500 font-normal">
-            {hasReplacement ? <span className="text-slate-600 dark:text-gray-300 font-black bg-slate-100/80 dark:bg-gray-700/40 px-1 py-0.25 rounded">교체 {formatDate(el.installationDe)}</span> : el.installationDe ? <span>설치 {formatDate(el.installationDe)}</span> : null}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11.5px] text-slate-400 dark:text-gray-500 font-normal">
+              {hasReplacement ? <span className="text-slate-600 dark:text-gray-300 font-black bg-slate-100/80 dark:bg-gray-700/40 px-1 py-0.25 rounded">교체 {formatDate(el.installationDe)}</span> : el.installationDe ? <span>설치 {formatDate(el.installationDe)}</span> : null}
+            </span>
+            {settings.elvtrKindNm && el.elvtrKindNm && <span className="px-1 py-0.25 text-[10.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded">{el.elvtrKindNm}</span>}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {settings.elvtrKindNm && el.elvtrKindNm && <span className="px-1 py-0.25 text-[10.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded">{el.elvtrKindNm}</span>}
             {settings.elvtrStts && el.elvtrStts && <span className={`px-1.5 py-0.25 text-[10.5px] font-bold rounded border tracking-tight ${statusBadgeClass}`}>{el.elvtrStts}</span>}
           </div>
         </div>
@@ -205,7 +207,7 @@ export default function ElevatorCard({
                   {el.isTopGround && <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-bold rounded px-1 shrink-0">최고층</span>}
                   {el.isDeepUnderground && <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-bold rounded px-1 shrink-0">최저층</span>}
                 </div>
-                <div className="flex items-center gap-1 shrink-0 z-10" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                   <BookmarkButton elevator={el} bookmarkedIds={bookmarkedIds} />
                 </div>
               </div>
@@ -226,11 +228,13 @@ export default function ElevatorCard({
 
               {/* 하단 설치일 경계선 마감 패딩 초밀착 */}
               <div className="flex items-center justify-between gap-2 pt-0.5 mt-0.5 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
-                <div className="text-[11.5px] text-slate-400 dark:text-gray-500 font-normal">
-                  {hasReplacement ? <span className="text-slate-600 dark:text-gray-300 font-black bg-slate-100/80 dark:bg-gray-700/40 px-1 py-0.25 rounded">교체 {formatDate(el.installationDe)}</span> : el.installationDe ? <span>설치 {formatDate(el.installationDe)}</span> : null}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11.5px] text-slate-400 dark:text-gray-500 font-normal">
+                    {hasReplacement ? <span className="text-slate-600 dark:text-gray-300 font-black bg-slate-100/80 dark:bg-gray-700/40 px-1 py-0.25 rounded">교체 {formatDate(el.installationDe)}</span> : el.installationDe ? <span>설치 {formatDate(el.installationDe)}</span> : null}
+                  </span>
+                  {settings.elvtrKindNm && el.elvtrKindNm && <span className="px-1 py-0.25 text-[10.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded">{el.elvtrKindNm}</span>}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {settings.elvtrKindNm && el.elvtrKindNm && <span className="px-1 py-0.25 text-[10.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded">{el.elvtrKindNm}</span>}
                   {settings.elvtrStts && el.elvtrStts && <span className={`px-1.5 py-0.25 text-[10.5px] font-bold rounded border tracking-tight ${statusBadgeClass}`}>{el.elvtrStts}</span>}
                 </div>
               </div>

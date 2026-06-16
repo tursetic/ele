@@ -109,18 +109,18 @@ export default function App() {
 
   // ★ [비밀 문구 검색 상태] session-scoped, totalPages보다 먼저 선언해야 함
   const allResultsRef = useRef<ElevatorWithBadges[] | null>(null);
-  const isSecretSearchRef = useRef<boolean>(false);
+  const [isSecretSearch, setIsSecretSearch] = useState(false);
   const secretInputBlockedRef = useRef<boolean>(false);
   const [secretInput, setSecretInput] = useState('');
   const [secretLoading, setSecretLoading] = useState(false);
 
   const totalPages = useMemo(() => {
     // 비밀 검색 모드에서는 전체 allResults 기준
-    if (isSecretSearchRef.current && allResultsRef.current) {
+    if (isSecretSearch && allResultsRef.current) {
       return Math.ceil(allResultsRef.current.length / ROWS_PER_PAGE);
     }
     return Math.ceil(totalCount / ROWS_PER_PAGE);
-  }, [totalCount]);
+  }, [totalCount, isSecretSearch]);
   const [lastSearchParams, setLastSearchParams] = useState<LastSearchParams | null>(null);
 
   interface TabCache {
@@ -153,7 +153,7 @@ export default function App() {
       hasVisitedMap,
       mapState: currentMapState,
       allResults: allResultsRef.current,
-      isSecretSearch: isSecretSearchRef.current,
+      isSecretSearch: isSecretSearch,
       geoGroups,
       mapKey,
     };
@@ -168,6 +168,7 @@ export default function App() {
       setViewMode(cached.viewMode);
       setHasVisitedMap(cached.hasVisitedMap);
       allResultsRef.current = cached.allResults;
+      setIsSecretSearch(cached.isSecretSearch);
       isSecretSearchRef.current = cached.isSecretSearch;
       setGeoGroups(cached.geoGroups);
       setMapKey(cached.mapKey);
@@ -195,6 +196,7 @@ export default function App() {
       setViewMode('list');
       setHasVisitedMap(false);
       allResultsRef.current = null;
+      setIsSecretSearch(false);
       isSecretSearchRef.current = false;
       setError('');
       setSearchTab(newTab);
@@ -372,7 +374,7 @@ export default function App() {
 
   // 비밀 검색 모드에서는 목록에 페이지네이션 적용
   const paginatedDisplayResults = useMemo(() => {
-    if (isSecretSearchRef.current && allResultsRef.current && viewMode === 'list') {
+    if (isSecretSearch && allResultsRef.current && viewMode === 'list') {
       const start = (currentPage - 1) * ROWS_PER_PAGE;
       const end = start + ROWS_PER_PAGE;
       const rawResults = allResultsRef.current.slice(start, end);
@@ -384,7 +386,7 @@ export default function App() {
       })));
     }
     return displayResults;
-  }, [displayResults, currentPage, viewMode, applyFilters]);
+  }, [displayResults, currentPage, viewMode, applyFilters, isSecretSearch]);
 
   const groupedBuildings = useMemo(() => {
     const groups: Record<string, { buildingName: string; address: string; elevators: ElevatorWithBadges[] }> = {};
@@ -463,6 +465,7 @@ export default function App() {
       setTotalCount(total);
       // Reset secret search state on normal search
       allResultsRef.current = null;
+      setIsSecretSearch(false);
       isSecretSearchRef.current = false;
       secretInputBlockedRef.current = false;
     } catch (err) {
@@ -534,8 +537,13 @@ export default function App() {
       const sorted = sortElevators(allItems);
       const withBadges = assignBadges(sorted);
 
+      // 비밀 검색 모드 설정
       allResultsRef.current = withBadges;
+      setIsSecretSearch(true);
       isSecretSearchRef.current = true;
+      secretInputBlockedRef.current = true;
+
+      // 상태 업데이트 - 지도와 목록 모두에서 사용 가능하도록
       setPageResults(withBadges);
       setTotalCount(totalCountForSecret);
       setHasSearched(true);
@@ -546,9 +554,8 @@ export default function App() {
       setModelKeyword('');
       setMinGroundFloor('');
       setMinSpeed('');
-      // 검색 완료 후 목록 뷰로 전환
-      setViewMode('list');
-      secretInputBlockedRef.current = true;
+      // 지도 상태 유지 - viewMode와 hasVisitedMap 변경 없음
+      // geoGroups는 useEffect에서 자동 생성됨
     } catch (err) {
       console.error('[SecretSearch] Error:', err);
       setError('검색 중 오류가 발생했습니다.');
@@ -756,7 +763,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-base font-bold text-gray-900 dark:text-gray-100">elNavi</h1>
-            <p className="text-xs text-gray-400 dark:text-gray-500">내 손 안에 전국을 - 승강기 정보 조회</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">내 손 안에 전국을 - 엘네비</p>
           </div>
         </div>
         <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">

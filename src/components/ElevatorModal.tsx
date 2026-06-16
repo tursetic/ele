@@ -77,9 +77,9 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
   const [bookmarkLoading, setBookmarkLoading] = useState(true);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [folders, setFolders] = useState<BookmarkFolder[]>([]);
-  const [newFolderName, setNewFolderName] = useState('');
   const folderPickerRef = useRef<HTMLDivElement>(null);
   const folderTriggerRef = useRef<HTMLButtonElement>(null);
+  const [newFolderName, setNewFolderName] = useState('');
 
   const toggleHideRegularPass = () => {
     const next = !hideRegularPass;
@@ -280,6 +280,44 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
                         <span className="truncate">{f.name}</span>
                       </button>
                     ))}
+                    <div className="border-t border-gray-100 dark:border-gray-700 mt-1 pt-1 px-2">
+                      <div className="flex gap-1">
+                        <input
+                          type="text"
+                          value={newFolderName}
+                          onChange={(e) => setNewFolderName(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              const name = newFolderName.trim();
+                              if (!name) return;
+                              const folder = await createFolder(name);
+                              setFolders(prev => [...prev, folder]);
+                              setNewFolderName('');
+                            }
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          placeholder="새 폴더"
+                          className="flex-1 min-w-0 px-1.5 py-1 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-[10px] text-gray-700 dark:text-gray-300 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const name = newFolderName.trim();
+                            if (!name) return;
+                            const folder = await createFolder(name);
+                            setFolders(prev => [...prev, folder]);
+                            setNewFolderName('');
+                          }}
+                          className="p-1 text-blue-500 hover:text-blue-600 shrink-0"
+                          title="폴더 생성"
+                        >
+                          <FolderPlus size={11} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -334,22 +372,23 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
             </div>
 
             <div className="text-[11px] text-slate-400 dark:text-gray-500 pt-0.5 border-t border-slate-100 dark:border-gray-700/60 flex items-center justify-between">
-              <div className="flex flex-col gap-0 leading-none">
-                {hasReplacement ? (
-                  <>
-                    <span className="font-semibold text-slate-600 dark:text-gray-400 text-[11px] leading-tight">교체 {formatDate(el.installationDe)}</span>
-                    <span className="text-slate-400 dark:text-gray-500 text-[9.5px] font-medium leading-tight">최초설치 {formatDate(el.frstInstallationDe)}</span>
-                  </>
-                ) : el.installationDe ? (
-                  <span className="font-semibold text-slate-600 dark:text-gray-400 text-[11px] leading-tight">설치 {formatDate(el.installationDe)}</span>
-                ) : null}
+              <div className="flex items-center gap-1.5">
+                <div className="flex flex-col gap-0 leading-none">
+                  {hasReplacement ? (
+                    <>
+                      <span className="font-semibold text-slate-600 dark:text-gray-400 text-[11px] leading-tight">교체 {formatDate(el.installationDe)}</span>
+                      <span className="text-slate-400 dark:text-gray-500 text-[9.5px] font-medium leading-tight">최초설치 {formatDate(el.frstInstallationDe)}</span>
+                    </>
+                  ) : el.installationDe ? (
+                    <span className="font-semibold text-slate-600 dark:text-gray-400 text-[11px] leading-tight">설치 {formatDate(el.installationDe)}</span>
+                  ) : null}
+                </div>
+                {s.elvtrKindNm && el.elvtrKindNm && (
+                  <span className="px-1.5 py-0.25 text-[10px] font-bold border border-slate-200 dark:border-gray-700 text-slate-500 dark:text-gray-400 rounded shrink-0 tracking-tight self-center">
+                    {el.elvtrKindNm}
+                  </span>
+                )}
               </div>
-              
-              {s.elvtrKindNm && el.elvtrKindNm && (
-                <span className="px-1.5 py-0.25 text-[10px] font-bold border border-slate-200 dark:border-gray-700 text-slate-500 dark:text-gray-400 rounded shrink-0 tracking-tight self-end">
-                  {el.elvtrKindNm}
-                </span>
-              )}
             </div>
           </div>
           

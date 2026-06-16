@@ -266,7 +266,7 @@ export default function BuildingLayerMap({
                       activeOverlayBuldIdRef.current = buildingId;
 
                       const overlayContent = document.createElement('div');
-                      overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[285px] relative font-sans text-left z-[100]';
+                      overlayContent.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-200/50 dark:border-gray-700/50 p-2.5 w-[calc(100vw-32px)] max-w-[256px] relative font-sans text-left z-[100]';
 
                       ['wheel', 'mousewheel', 'mousedown', 'touchstart', 'pointerdown', 'dblclick'].forEach(evt => {
                         overlayContent.addEventListener(evt, (ev) => ev.stopPropagation(), { passive: true });
@@ -350,7 +350,7 @@ export default function BuildingLayerMap({
                                       ${deepUndergroundHtml}
                                       ${specialSectionHtml}
                                     </div>
-                                    <div class="shrink-0 flex items-center ml-auto z-10">
+                                    <div class="shrink-0 flex items-center ml-auto">
                                       ${bookmarkIconHtml}
                                     </div>
                                   </div>
@@ -368,9 +368,11 @@ export default function BuildingLayerMap({
                                     </div>
                                   </div>
                                   <div class="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-50/60 dark:border-gray-700/40 w-full text-[10.5px] text-slate-400 dark:text-gray-500">
-                                    <span>${dateDisplayHtml}</span>
-                                    <div class="flex items-center gap-1 shrink-0 ml-auto">
+                                    <div class="flex items-center gap-1.5">
+                                      <span>${dateDisplayHtml}</span>
                                       ${kindBadgeHtml}
+                                    </div>
+                                    <div class="flex items-center gap-1 shrink-0">
                                       <span class="px-1.5 py-0 text-[9.5px] font-bold rounded border tracking-tight shrink-0 ${statusBadgeClass}">${ev.elvtrStts || '-'}</span>
                                     </div>
                                   </div>
