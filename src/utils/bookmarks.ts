@@ -178,6 +178,7 @@ export function detectBookmarkChanges(currentData: ElevatorWithBadges): Bookmark
   const changeKeySuffix = (type: string, new_val: string) =>
     `${currentData.elevatorNo}:${type}:${new_val}`;
 
+  // 1. 모델명 변경 감지
   if (stored.elvtrModel !== currentData.elvtrModel) {
     const key = changeKeySuffix('model', currentData.elvtrModel || '');
     if (!notifiedSet.has(key)) {
@@ -191,6 +192,7 @@ export function detectBookmarkChanges(currentData: ElevatorWithBadges): Bookmark
     }
   }
 
+  // 2. 설치일자 변경 감지
   if (stored.installationDe !== currentData.installationDe) {
     const key = changeKeySuffix('installation', currentData.installationDe || '');
     if (!notifiedSet.has(key)) {
@@ -204,10 +206,9 @@ export function detectBookmarkChanges(currentData: ElevatorWithBadges): Bookmark
     }
   }
 
-  const specialKinds = ['설치', '수시'];
-  const wasSpecial = specialKinds.includes(stored.lastInspctKind || '');
-  const isNowSpecial = specialKinds.includes(currentData.lastInspctKind || '');
-  if (!wasSpecial && isNowSpecial) {
+  // 3. 최종검사종류 변경 감지 (검사종류명 또는 검사 날짜가 변경되었을 때 모두 감지하도록 수정)
+  const isNowSpecial = ['설치', '수시'].includes(currentData.lastInspctKind || '');
+  if (isNowSpecial && (stored.lastInspctKind !== currentData.lastInspctKind || stored.lastInspctDe !== currentData.lastInspctDe)) {
     const key = changeKeySuffix('inspection', currentData.lastInspctKind || '');
     if (!notifiedSet.has(key)) {
       changes.push({
@@ -220,14 +221,39 @@ export function detectBookmarkChanges(currentData: ElevatorWithBadges): Bookmark
     }
   }
 
+  // 한 번에 여러 개가 바뀌었을 경우 한 알림으로 병합(combined) 처리
+  if (changes.length > 1) {
+    const combined: BookmarkChange = {
+      elevator_no: currentData.elevatorNo,
+      building_name: bookmark.building_name,
+      changeType: 'combined' as any,
+      oldValue: '',
+      newValue: '',
+      timestamp: Date.now(),
+      details: changes.map(c => ({
+        field: c.changeType,
+        oldVal: c.oldValue,
+        newVal: c.newValue
+      })) as any
+    };
+    return [combined];
+  }
+
   return changes;
 }
 
 export function markChangeNotified(changes: BookmarkChange[]): void {
   const notifiedSet = getNotifiedSet();
   changes.forEach((c) => {
-    const key = `${c.elevator_no}:${c.changeType}:${c.newValue}`;
-    notifiedSet.add(key);
+    if (c.changeType === ('combined' as any) && (c as any).details) {
+      (c as any).details.forEach((d: any) => {
+        const key = `${c.elevator_no}:${d.field}:${d.newVal}`;
+        notifiedSet.add(key);
+      });
+    } else {
+      const key = `${c.elevator_no}:${c.changeType}:${c.newValue}`;
+      notifiedSet.add(key);
+    }
   });
   saveNotifiedSet(notifiedSet);
 }

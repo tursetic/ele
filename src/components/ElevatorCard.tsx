@@ -211,11 +211,12 @@ export default function ElevatorCard({
             ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
             : 'bg-slate-50 dark:bg-gray-800/50 text-slate-600 dark:text-gray-400 border-slate-200 dark:border-gray-700/40 font-normal text-[9.5px]';
 
+          // 🎯 [디자인 빌드업] MapView의 굵은 황색 보더를 이식하고, 일반 상태에 투명 가드를 세워 레이아웃 스냅 현상을 방어합니다.
           const itemBgClass = isBookmarked
-            ? 'bg-yellow-100/10 dark:bg-yellow-800/5'
+            ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500 shadow-xs'
             : isViewed
             ? 'bg-white dark:bg-gray-800 border-l-4 border-l-slate-300 dark:border-l-gray-600 opacity-70'
-            : 'bg-white dark:bg-gray-900';
+            : 'bg-white dark:bg-gray-900 border-l-4 border-l-transparent';
 
           return (
             <div

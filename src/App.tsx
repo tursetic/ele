@@ -147,7 +147,12 @@ export default function App() {
   const handleTabChange = useCallback((newTab: SearchTab) => {
     const currentTab = searchTab;
     const currentMapState = viewMode === 'map' && mapViewRef.current ? mapViewRef.current.getMapState() : null;
-    const currentScrollPosition = mainScrollRef.current?.scrollTop || 0;
+    
+    // 리스트 뷰를 보고 있을 때만 실시간 scrollTop을 측정하고, 지도 뷰 상태일 때는 보관 중이던 스크롤 값을 보존합니다.
+    const currentScrollPosition = viewMode === 'list'
+      ? (mainScrollRef.current?.scrollTop || 0)
+      : viewModeScrollRef.current;
+
     tabCacheRef.current[currentTab] = {
       pageResults,
       currentPage,
@@ -180,7 +185,12 @@ export default function App() {
       setMapKey(cached.mapKey);
       setError('');
       setSearchTab(newTab);
-      // Restore map state after a delay to allow map to initialize
+      
+      // 복귀할 탭의 스크롤 위치를 동기화합니다.
+      viewModeScrollRef.current = cached.scrollPosition;
+      tabScrollMapRef.current[newTab] = cached.scrollPosition;
+      isRestoringScrollRef.current = true;
+
       if (cached.viewMode === 'map' && cached.mapState) {
         setRestoreMode(true);
         setTimeout(() => {
@@ -191,14 +201,6 @@ export default function App() {
         }, 200);
       } else {
         setRestoreMode(false);
-      }
-      // Restore scroll position after render
-      if (cached.scrollPosition > 0) {
-        setTimeout(() => {
-          if (mainScrollRef.current) {
-            mainScrollRef.current.scrollTop = cached.scrollPosition;
-          }
-        }, 50);
       }
     } else {
       setPageResults([]);
@@ -366,6 +368,8 @@ export default function App() {
   const searchAbortRef = useRef<AbortController | null>(null);
   const pendingHistorySearchRef = useRef<boolean>(false);
   const viewModeScrollRef = useRef<number>(0);
+  const tabScrollMapRef = useRef<Record<string, number>>({ address: 0, elevatorNo: 0, mapSearch: 0 });
+  const isRestoringScrollRef = useRef<boolean>(false);
 
   const filterOptions: FilterOptions = useMemo(
     () => (pageResults.length > 0 ? collectFilterOptions(pageResults) : {
@@ -462,8 +466,8 @@ export default function App() {
     [enhancedPageResults, applyFilters]
   );
 
-  // 🎯 [완치 1] 시크릿 대량 검색 모드일 때 100건 조각이 아니라 수집된 전체(Total) 결과에 필터링이 먹힌 후 슬라이싱 배분되도록 연산 공식 수정
-  // 🎯 [완치 1] 시크릿 검색 모드일 때, 100건 조각이 아니라 수집된 전체(Total) 대량 결과물에 대해 유저 필터가 선제 동기화되도록 연산 순서 정정
+  // ★ [완치 1] 시크릿 대량 검색 모드일 때 100건 조각이 아니라 수집된 전체(Total) 결과에 필터링이 먹힌 후 슬라이싱 배분되도록 연산 공식 수정
+  // ★ [완치 1] 시크릿 검색 모드일 때, 100건 조각이 아니라 수집된 전체(Total) 대량 결과물에 대해 유저 필터가 선제 동기화되도록 연산 순서 정정
   const paginatedDisplayResults = useMemo(() => {
     if (isSecretSearch && allResultsRef.current && viewMode === 'list') {
       // 1. 수집된 5000건 이하의 전체 데이터에 대해 사용자가 지정한 필터를 먼저 매핑 적용
@@ -481,16 +485,27 @@ export default function App() {
     return displayResults;
   }, [displayResults, currentPage, viewMode, applyFilters, isSecretSearch]);
 
-  // Restore scroll position when switching back to list view within the same tab
+  // [스크롤 픽셀 복원 보정] 탭 컨텍스트 복귀 및 보기 모드 회항 시 마운트 타임라인을 자동 추적하여 강제 복원
   useEffect(() => {
-    if (viewMode === 'list' && viewModeScrollRef.current > 0 && mainScrollRef.current) {
-      setTimeout(() => {
-        if (mainScrollRef.current) {
-          mainScrollRef.current.scrollTop = viewModeScrollRef.current;
-        }
-      }, 50);
+    if (viewMode === 'list' && mainScrollRef.current && pageResults.length > 0) {
+      const targetScroll = tabScrollMapRef.current[searchTab] || 0;
+      
+      if (targetScroll > 0) {
+        isRestoringScrollRef.current = true;
+        const timer = setTimeout(() => {
+          if (mainScrollRef.current) {
+            mainScrollRef.current.scrollTop = targetScroll;
+          }
+          setTimeout(() => {
+            isRestoringScrollRef.current = false;
+          }, 60);
+        }, 30);
+        return () => clearTimeout(timer);
+      } else {
+        isRestoringScrollRef.current = false;
+      }
     }
-  }, [viewMode]);
+  }, [searchTab, viewMode, pageResults]);
 
   const groupedBuildings = useMemo(() => {
     const groups: Record<string, { buildingName: string; address: string; elevators: ElevatorWithBadges[] }> = {};
@@ -715,7 +730,7 @@ export default function App() {
     setGeocoding(true);
 
     // 🎯 [완치 치트키] 수천 건의 대량 데이터 유입 시 카카오 Geocoder API 서버의 드롭 차단 제어 장치
-            // 🎯 [완치 2구역] 고속 마커 로드와 카카오 API 차단 우회를 모두 만족하는 최적 밸런스 스로틀링 엔진
+    // 🎯 [완치 2구역] 고속 마커 로드와 카카오 API 차단 우회를 모두 만족하는 최적 밸런스 스로틀링 엔진
     const run = async () => {
       try {
         const finalGeoGroups: GeoGroup[] = [];
@@ -789,6 +804,7 @@ export default function App() {
     setModelKeyword('');
     setMinGroundFloor('');
     setMinSpeed('');
+    isRestoringScrollRef.current = true;
     setViewMode('list');
     setHasVisitedMap(false);
     setMapKey(k => k + 1);
@@ -921,26 +937,39 @@ export default function App() {
       </header>
 
       {bookmarkChanges.length > 0 && (
-        <div className="mx-4 mt-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2.5 flex items-start gap-2">
+        <div className="mx-4 mt-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-800 rounded-xl px-3.5 py-2.5 flex items-start gap-2.5 shadow-xs">
           <Bell size={14} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-bold text-amber-700 dark:text-amber-400">북마크 변경사항 알림</p>
-              <button
-                onClick={handleDismissChanges}
-                className="p-0.5 hover:bg-amber-100 dark:hover:bg-amber-800 rounded transition-colors"
-              >
+              <p className="text-xs font-black text-amber-800 dark:text-amber-300">북마크 승강기 제원 변동 사항 안내</p>
+              <button onClick={handleDismissChanges} className="p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-lg transition-colors focus:outline-none">
                 <XCircle size={14} className="text-amber-500 dark:text-amber-400" />
               </button>
             </div>
-            <div className="mt-1 space-y-0.5">
+            <div className="mt-1.5 space-y-1">
               {bookmarkChanges.map((c, idx) => (
-                <p key={idx} className="text-xs text-amber-700 dark:text-amber-300">
-                  <span className="font-medium">{c.building_name || formatElevatorNo(c.elevator_no)}</span>: {
-                  c.changeType === 'model' && `모델명 ${c.oldValue} → ${c.newValue}`}
-                  {c.changeType === 'installation' && `설치일자 ${formatDate(c.oldValue)} → ${formatDate(c.newValue)}`}
-                  {c.changeType === 'inspection' && `검사종류 ${c.oldValue} → ${c.newValue}`}
-                </p>
+                <div key={idx} className="text-xs text-amber-800 dark:text-amber-300 bg-white/60 dark:bg-gray-800/40 p-2 rounded-lg border border-amber-200/20">
+                  <p className="font-bold text-[11px] mb-1 text-gray-900 dark:text-gray-100">
+                    🏢 {c.building_name || '지정 빌딩'} <span className="font-normal text-slate-400">({formatElevatorNo(c.elevator_no)})</span>
+                  </p>
+                  {c.changeType === ('combined' as any) && (c as any).details ? (
+                    <div className="pl-1 space-y-0.5 text-[10.5px]">
+                      {(c as any).details.map((d: any, dIdx: number) => (
+                        <p key={dIdx} className="truncate">
+                          • {d.field === 'model' ? '모델명' : d.field === 'installation' ? '설치일자' : '검사종류'}:{' '}
+                          <span className="line-through text-slate-400">{d.field === 'installation' ? formatDate(d.oldVal) : d.oldVal}</span> →{' '}
+                          <span className="font-bold text-blue-600 dark:text-blue-400">{d.field === 'installation' ? formatDate(d.newVal) : d.newVal}</span>
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="pl-1 text-[10.5px] truncate">
+                      • {c.changeType === 'model' && `모델명: ${c.oldValue} → ${c.newValue}`}
+                      {c.changeType === 'installation' && `설치일자: ${formatDate(c.oldValue)} → ${formatDate(c.newValue)}`}
+                      {c.changeType === 'inspection' && `검사종류: ${c.oldValue} → ${c.newValue}`}
+                    </p>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -978,9 +1007,7 @@ export default function App() {
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
               <button
                 onClick={() => {
-                  if (viewMode !== 'list') {
-                    viewModeScrollRef.current = mainScrollRef.current?.scrollTop || 0;
-                  }
+                  isRestoringScrollRef.current = true;
                   setViewMode('list');
                 }}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${viewMode === 'list' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
@@ -989,8 +1016,9 @@ export default function App() {
               </button>
               <button
                 onClick={() => {
-                  if (viewMode !== 'map') {
-                    viewModeScrollRef.current = mainScrollRef.current?.scrollTop || 0;
+                  if (mainScrollRef.current) {
+                    tabScrollMapRef.current[searchTab] = mainScrollRef.current.scrollTop;
+                    viewModeScrollRef.current = mainScrollRef.current.scrollTop;
                   }
                   setViewMode('map');
                   setHasVisitedMap(true);
@@ -1004,7 +1032,19 @@ export default function App() {
         </div>
       )}
 
-      <main ref={mainScrollRef} className="flex-1 flex flex-col overflow-y-auto pb-6">
+      {/* 🎯 [실시간 스크롤 트래커 레퍼런스 바인딩] 사용자가 마우스를 제어하여 스크롤 위치를 바꿀 때 실시간 좌표를 저장합니다. */}
+      <main 
+        ref={mainScrollRef} 
+        onScroll={(e) => {
+          if (isRestoringScrollRef.current) return;
+          if (viewMode === 'list') {
+            const st = e.currentTarget.scrollTop;
+            tabScrollMapRef.current[searchTab] = st;
+            viewModeScrollRef.current = st;
+          }
+        }}
+        className="flex-1 flex flex-col overflow-y-auto pb-6"
+      >
         {/* 🛡️ [Keep-Alive 장착] DOM 파괴를 차단하고 hidden 클래스로 감추어 지도 위치 영구 보존 및 북마크 연동 완료 */}
         <div className={`p-4 flex-1 flex flex-col ${searchTab === 'mapSearch' ? '' : 'hidden'}`}>
           <BuildingLayerMap
@@ -1073,7 +1113,6 @@ export default function App() {
               restoreMode={restoreMode}
             />
             
-            {/* 🎯 [완치 3 - 스텔스 마감] 글자 굵기 정상화(font-normal), 플레이스홀더 전면 삭제, 맞든 틀리든 항상 공백 리셋 연동 완료 */}
             <div className="mt-1.5 w-full">
               <input
                 type="text"
@@ -1172,7 +1211,6 @@ export default function App() {
         <BellNotification
           onClose={() => setShowBell(false)}
           onItemClick={(change) => {
-            // When clicking on a notification, search for that elevator and show details
             if (change.elevator_no) {
               setSearchTab('elevatorNo');
               setElevatorNoQuery(change.elevator_no);
@@ -1182,7 +1220,6 @@ export default function App() {
         />
       )}
 
-      {/* 🎯 [인스타그램 스타일 하단 탭바] 화면 하단에 늘 고정되며 다크모드를 완벽하게 지원하는 내비게이션 인터페이스 */}
       <nav className="fixed bottom-0 left-0 right-0 z-[150] max-w-2xl mx-auto bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 flex items-center justify-around h-16 px-2 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]">
         <button
           type="button"

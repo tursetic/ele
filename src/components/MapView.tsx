@@ -390,7 +390,12 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
               overlayContent.addEventListener(evt, blockMapInteractions, { passive: true });
             });
 
-            const cleanAddress = (group.address || '').replace(/·/g, ' ').replace(/\s+/g, ' ').trim();
+            // 🎯 [완치] group.address(address1)에 갇혀있던 설계 한계를 깨고, 원본 데이터의 address2까지 유실 없이 결합합니다.
+            const primaryEv = elevatorsList[0];
+            const fullAddr = primaryEv 
+              ? `${primaryEv.address1 || ''}${primaryEv.address2 ? ` ${primaryEv.address2}` : ''}` 
+              : group.address || '';
+            const cleanAddress = fullAddr.replace(/·/g, ' ').replace(/\s+/g, ' ').trim();
 
             // 🎯 [완치 통합 가두리] ElevatorCard v25 이식 및 번호 배지 동기화 마감
             const rowsHtml = bldgEntries.map(([bName, evs]) => {
