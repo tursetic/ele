@@ -380,7 +380,7 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
                       <span className="text-slate-400 dark:text-gray-500 text-[9.5px] font-medium leading-tight">최초설치 {formatDate(el.frstInstallationDe)}</span>
                     </>
                   ) : el.installationDe ? (
-                    <span className="font-semibold text-slate-600 dark:text-gray-400 text-[11px] leading-tight">설치 {formatDate(el.installationDe)}</span>
+                    <span className="font-medium text-slate-600 dark:text-gray-400 text-[11px] leading-tight">설치 {formatDate(el.installationDe)}</span>
                   ) : null}
                 </div>
                 {s.elvtrKindNm && el.elvtrKindNm && (

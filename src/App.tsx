@@ -3,7 +3,7 @@ import { Settings, Map as MapIcon, List, AlertCircle, Bell, XCircle, Sliders } f
 import { Elevator as ElevatorType, ElevatorWithBadges, SettingsFields, SearchHistory, FilterOptions, SearchTab, GeoGroup } from './types';
 import { searchByElevatorNo, searchByAddress, geocodeAddress } from './utils/api';
 import { sortElevators, assignBadges, collectFilterOptions, parseRatedSpeed, formatRatedSpeed, formatElevatorNo, extractYear, formatDate } from './utils/elevatorHelpers';
-import { getBookmarkedElevatorNos, getAllBookmarkChanges, markChangeNotified, BookmarkChange, subscribeToChanges, clearGlobalChanges } from './utils/bookmarks';
+import { getBookmarkedElevatorNos, markChangeNotified, BookmarkChange, subscribeToChanges, clearGlobalChanges, getNotificationHistory } from './utils/bookmarks';
 
 // ★ [누락 해결] 건물 레이어 전용 격리 지도를 최상단에 명확하게 로드하여 ReferenceError 원천 차단
 import BuildingLayerMap from './components/BuildingLayerMap';
@@ -15,6 +15,7 @@ import MapView from './components/MapView';
 import SettingsMenu from './components/SettingsMenu';
 import Pagination from './components/Pagination';
 import FilterSidebar from './components/FilterSidebar';
+import BellNotification from './components/BellNotification';
 
 const ROWS_PER_PAGE = 100;
 
@@ -137,13 +138,16 @@ export default function App() {
     isSecretSearch: boolean;
     geoGroups: GeoGroup[];
     mapKey: number;
+    scrollPosition: number;
   }
   const tabCacheRef = useRef<Record<string, TabCache | null>>({});
   const mapViewRef = useRef<{ getMapState: () => MapState | null; setMapState: (state: MapState) => void } | null>(null);
+  const mainScrollRef = useRef<HTMLDivElement | null>(null);
 
   const handleTabChange = useCallback((newTab: SearchTab) => {
     const currentTab = searchTab;
     const currentMapState = viewMode === 'map' && mapViewRef.current ? mapViewRef.current.getMapState() : null;
+    const currentScrollPosition = mainScrollRef.current?.scrollTop || 0;
     tabCacheRef.current[currentTab] = {
       pageResults,
       currentPage,
@@ -157,6 +161,7 @@ export default function App() {
       isSecretSearch: isSecretSearchRef.current,
       geoGroups,
       mapKey,
+      scrollPosition: currentScrollPosition,
     };
 
     const cached = tabCacheRef.current[newTab];
@@ -187,6 +192,14 @@ export default function App() {
       } else {
         setRestoreMode(false);
       }
+      // Restore scroll position after render
+      if (cached.scrollPosition > 0) {
+        setTimeout(() => {
+          if (mainScrollRef.current) {
+            mainScrollRef.current.scrollTop = cached.scrollPosition;
+          }
+        }, 50);
+      }
     } else {
       setPageResults([]);
       setCurrentPage(1);
@@ -207,6 +220,7 @@ export default function App() {
   const [selectedElevator, setSelectedElevator] = useState<ElevatorWithBadges | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
+  const [showBell, setShowBell] = useState(false);
   const [settings, setSettings] = useState<SettingsFields>(loadSettings);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
 
@@ -218,6 +232,14 @@ export default function App() {
   }, []);
 
   const [bookmarkChanges, setBookmarkChanges] = useState<BookmarkChange[]>([]);
+  const [notificationCount, setNotificationCount] = useState(0);
+
+  useEffect(() => {
+    setNotificationCount(getNotificationHistory().length);
+    const handleUpdate = () => setNotificationCount(getNotificationHistory().length);
+    window.addEventListener('notificationHistoryUpdated', handleUpdate);
+    return () => window.removeEventListener('notificationHistoryUpdated', handleUpdate);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeToChanges(setBookmarkChanges);
@@ -343,6 +365,7 @@ export default function App() {
   const geocodeAbortRef = useRef<AbortController | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const pendingHistorySearchRef = useRef<boolean>(false);
+  const viewModeScrollRef = useRef<number>(0);
 
   const filterOptions: FilterOptions = useMemo(
     () => (pageResults.length > 0 ? collectFilterOptions(pageResults) : {
@@ -449,7 +472,7 @@ export default function App() {
         buildingMaxGround: el.buildingMaxGround || 0,
         buildingMaxUnderground: el.buildingMaxUnderground || 0,
       })));
-      
+
       // 2. 필터가 완벽하게 먹힌 결과셋 위에서 현재 목차 페이지 오프셋(100건)만큼 슬라이싱 분배
       const start = (currentPage - 1) * ROWS_PER_PAGE;
       const end = start + ROWS_PER_PAGE;
@@ -457,6 +480,17 @@ export default function App() {
     }
     return displayResults;
   }, [displayResults, currentPage, viewMode, applyFilters, isSecretSearch]);
+
+  // Restore scroll position when switching back to list view within the same tab
+  useEffect(() => {
+    if (viewMode === 'list' && viewModeScrollRef.current > 0 && mainScrollRef.current) {
+      setTimeout(() => {
+        if (mainScrollRef.current) {
+          mainScrollRef.current.scrollTop = viewModeScrollRef.current;
+        }
+      }, 50);
+    }
+  }, [viewMode]);
 
   const groupedBuildings = useMemo(() => {
     const groups: Record<string, { buildingName: string; address: string; elevators: ElevatorWithBadges[] }> = {};
@@ -868,9 +902,22 @@ export default function App() {
             <p className="text-xs text-gray-400 dark:text-gray-500">내 손 안에 전국을 - 엘네비</p>
           </div>
         </div>
-        <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-          <Settings size={20} className="text-gray-500 dark:text-gray-400" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowBell(true)}
+            className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative"
+          >
+            <Bell size={20} className="text-gray-500 dark:text-gray-400" />
+            {notificationCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                {notificationCount > 99 ? '99+' : notificationCount}
+              </span>
+            )}
+          </button>
+          <button onClick={() => setShowSettings(true)} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <Settings size={20} className="text-gray-500 dark:text-gray-400" />
+          </button>
+        </div>
       </header>
 
       {bookmarkChanges.length > 0 && (
@@ -930,13 +977,21 @@ export default function App() {
             </button>
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
               <button
-                onClick={() => setViewMode('list')}
+                onClick={() => {
+                  if (viewMode !== 'list') {
+                    viewModeScrollRef.current = mainScrollRef.current?.scrollTop || 0;
+                  }
+                  setViewMode('list');
+                }}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${viewMode === 'list' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
               >
                 <List size={12} /> 목록
               </button>
               <button
                 onClick={() => {
+                  if (viewMode !== 'map') {
+                    viewModeScrollRef.current = mainScrollRef.current?.scrollTop || 0;
+                  }
                   setViewMode('map');
                   setHasVisitedMap(true);
                 }}
@@ -949,7 +1004,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 flex flex-col overflow-y-auto pb-6">
+      <main ref={mainScrollRef} className="flex-1 flex flex-col overflow-y-auto pb-6">
         {/* 🛡️ [Keep-Alive 장착] DOM 파괴를 차단하고 hidden 클래스로 감추어 지도 위치 영구 보존 및 북마크 연동 완료 */}
         <div className={`p-4 flex-1 flex flex-col ${searchTab === 'mapSearch' ? '' : 'hidden'}`}>
           <BuildingLayerMap
@@ -1110,6 +1165,20 @@ export default function App() {
           onMinSpeedChange={setMinSpeed}
           hideEscalator={hideEscalator}
           onHideEscalatorChange={setHideEscalator}
+        />
+      )}
+
+      {showBell && (
+        <BellNotification
+          onClose={() => setShowBell(false)}
+          onItemClick={(change) => {
+            // When clicking on a notification, search for that elevator and show details
+            if (change.elevator_no) {
+              setSearchTab('elevatorNo');
+              setElevatorNoQuery(change.elevator_no);
+              pendingHistorySearchRef.current = true;
+            }
+          }}
         />
       )}
 

@@ -3,6 +3,7 @@ import { Bookmark, BookmarkFolder, ElevatorWithBadges } from '../types';
 const STORAGE_KEY = 'brelev_local_bookmarks_v1';
 const FOLDERS_KEY = 'brelev_bookmark_folders_v1';
 const NOTIFIED_KEY = 'brelev_notified_changes_v1';
+const CHANGES_HISTORY_KEY = 'brelev_changes_history_v1';
 
 export interface BookmarkChange {
   elevator_no: string;
@@ -10,6 +11,7 @@ export interface BookmarkChange {
   changeType: 'model' | 'installation' | 'inspection';
   oldValue: string;
   newValue: string;
+  timestamp?: number;
 }
 
 const readLocalRaw = (): Bookmark[] => {
@@ -202,7 +204,7 @@ export function detectBookmarkChanges(currentData: ElevatorWithBadges): Bookmark
     }
   }
 
-  const specialKinds = ['설치검사', '수시검사'];
+  const specialKinds = ['설치', '수시'];
   const wasSpecial = specialKinds.includes(stored.lastInspctKind || '');
   const isNowSpecial = specialKinds.includes(currentData.lastInspctKind || '');
   if (!wasSpecial && isNowSpecial) {
@@ -248,6 +250,8 @@ export function setGlobalChanges(changes: BookmarkChange[]): void {
   changeListeners.forEach(fn => fn([...pendingGlobalChanges]));
   if (changes.length > 0) {
     window.dispatchEvent(new CustomEvent('bookmarkChangesDetected', { detail: changes }));
+    // Also persist to notification history
+    addNotificationsToHistory(changes);
   }
 }
 
@@ -267,4 +271,67 @@ export function subscribeToChanges(fn: (changes: BookmarkChange[]) => void): () 
 
 export function getAllBookmarkChanges(): BookmarkChange[] {
   return [...pendingGlobalChanges];
+}
+
+// ── Notification History ──
+
+export interface NotificationHistoryItem extends BookmarkChange {
+  id: string;
+  dismissedAt?: number;
+}
+
+const readHistoryRaw = (): NotificationHistoryItem[] => {
+  try {
+    const data = localStorage.getItem(CHANGES_HISTORY_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeHistoryRaw = (items: NotificationHistoryItem[]): void => {
+  try {
+    localStorage.setItem(CHANGES_HISTORY_KEY, JSON.stringify(items));
+  } catch {}
+};
+
+export function getNotificationHistory(): NotificationHistoryItem[] {
+  return readHistoryRaw();
+}
+
+export function addNotificationToHistory(change: BookmarkChange): NotificationHistoryItem {
+  const history = readHistoryRaw();
+  const item: NotificationHistoryItem = {
+    ...change,
+    id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    timestamp: change.timestamp || Date.now(),
+  };
+  history.unshift(item);
+  writeHistoryRaw(history);
+  window.dispatchEvent(new CustomEvent('notificationHistoryUpdated'));
+  return item;
+}
+
+export function addNotificationsToHistory(changes: BookmarkChange[]): NotificationHistoryItem[] {
+  const history = readHistoryRaw();
+  const items: NotificationHistoryItem[] = changes.map(change => ({
+    ...change,
+    id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    timestamp: change.timestamp || Date.now(),
+  }));
+  history.unshift(...items);
+  writeHistoryRaw(history);
+  window.dispatchEvent(new CustomEvent('notificationHistoryUpdated'));
+  return items;
+}
+
+export function removeNotificationFromHistory(id: string): void {
+  const history = readHistoryRaw().filter(h => h.id !== id);
+  writeHistoryRaw(history);
+  window.dispatchEvent(new CustomEvent('notificationHistoryUpdated'));
+}
+
+export function clearNotificationHistory(): void {
+  writeHistoryRaw([]);
+  window.dispatchEvent(new CustomEvent('notificationHistoryUpdated'));
 }
