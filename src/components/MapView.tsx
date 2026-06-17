@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { GeoGroup, ElevatorWithBadges, SettingsFields } from '../types';
 import { ensureKakaoReady } from '../utils/api';
-import { formatDate, formatRatedSpeed, checkShuttleSection } from '../utils/elevatorHelpers';
+import { formatDate, formatRatedSpeed, formatElevatorNo, checkShuttleSection } from '../utils/elevatorHelpers';
 import { Maximize, Minimize } from 'lucide-react';
 import { removeBookmark } from '../utils/bookmarks';
 import { MapState } from '../App';
@@ -46,6 +46,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
 }, ref) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
+  const templatesRef = useRef<any[]>([]); // overlays 위임 관리
   const overlaysRef = useRef<any[]>([]);
   const customMarkersRef = useRef<any[]>([]);
   const hasSetBoundsRef = useRef(false);
@@ -86,14 +87,14 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
     },
   }), [geoGroups]);
 
-  // 🎯 [완치 핵심 코어] 화면 내부 마커의 노출 한계선을 원본 순서 기준 300개로 변경하여 대량 로드 성능을 보장합니다.
+  // 🎯 [최적화 코어] 화면 내부 마커의 노출 한계선을 원본 순서 기준 300개로 변경하여 대량 로드 성능 보장
   const updateMarkerVisibility = useCallback(() => {
     const map = mapInstanceRef.current;
     if (!map || !customMarkersRef.current || customMarkersRef.current.length === 0) return;
 
     const bounds = map.getBounds();
     let insideBoundsCount = 0;
-    const MAX_VISIBLE_MARKERS = 300; // 🎯 유저 요구사항: 최대 300개로 조절 완료
+    const MAX_VISIBLE_MARKERS = 300;
 
     customMarkersRef.current.forEach((markerOverlay) => {
       if (!markerOverlay) return;
@@ -391,6 +392,156 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
 
             const cleanAddress = (group.address || '').replace(/·/g, ' ').replace(/\s+/g, ' ').trim();
 
+            // 🎯 [완치 통합 가두리] ElevatorCard v25 이식 및 번호 배지 동기화 마감
+            const rowsHtml = bldgEntries.map(([bName, evs]) => {
+              const buildingSectionHeader = isMultiBuilding ? `
+                <div class="flex items-center gap-1.5 px-0.5 py-0 sticky top-0 bg-white dark:bg-gray-800 z-10">
+                  <div class="w-0.5 h-2 bg-blue-500 rounded-full"></div>
+                  <span class="text-[10px] font-semibold text-gray-600 dark:text-gray-400 truncate max-w-[170px]">${bName}</span>
+                  <span class="text-[9px] font-bold text-blue-500 bg-blue-50/60 dark:bg-blue-950/40 px-1 rounded shrink-0">${evs.length}대</span>
+                </div>
+              ` : '';
+
+              const listRows = evs.map((ev, idx) => {
+                const shuttle = checkShuttleSection(ev.shuttleSection);
+                const displaySpeed = formatRatedSpeed(ev.ratedSpeed);
+                const displayLoad = ev.liveLoad ? String(ev.liveLoad).replace(/kg|KG/gi, '').trim() + ' kg' : '';
+                const asignNo = (ev.elvtrAsignNo || '').trim().replace(/호기$|호$/, '');
+                const displayAsign = asignNo ? `${asignNo}호기` : `${idx + 1}호기`;
+                const displayAsignWithPlace = ev.installationPlace 
+                  ? `${displayAsign} (${ev.installationPlace.trim()})` 
+                  : displayAsign;
+
+                const isRowBookmarked = bookmarkedIds.has(ev.elevatorNo);
+                const isRowViewed = viewedIds.has(ev.elevatorNo);
+
+                const maxGround = ev.buildingMaxGround || 0;
+                const maxUnderground = ev.buildingMaxUnderground || 0;
+                const currentGround = parseInt(ev.divGroundFloorCnt) || 0;
+                const currentUnderground = parseInt(ev.divUndgrndFloorCnt) || 0;
+                
+                const showHighestLowest = elevatorsList.length >= 2;
+                const isTopGround = showHighestLowest && maxGround > 0 && currentGround === maxGround;
+                const isDeepUnderground = showHighestLowest && maxUnderground > 0 && currentUnderground === maxUnderground;
+
+                const rowBgClass = isRowBookmarked
+                  ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500'
+                  : isRowViewed
+                  ? 'bg-slate-50/30 dark:bg-slate-900/5 border-l-2 border-l-slate-200/50 dark:border-l-gray-700'
+                  : 'bg-white dark:bg-gray-800 border-l-2 border-l-slate-200/40 dark:border-l-gray-700/40';
+                  
+                const rowOpacityClass = isRowViewed && !isRowBookmarked ? 'opacity-55' : '';
+
+                let modelColorClass = 'text-[#8B4513] dark:text-[#EAA850]';
+                const manu = ev.manufacturerName || '';
+                if (manu.includes('현대엘')) modelColorClass = 'text-emerald-600 dark:text-emerald-400';
+                else if (manu.includes('오티스엘')) modelColorClass = 'text-indigo-600 dark:text-indigo-400';
+                else if (manu.includes('티케이엘')) modelColorClass = 'text-sky-500 dark:text-sky-400';
+                else if (manu.includes('미쓰비시') || primaryManu.includes('후지테크')) modelColorClass = 'text-red-500 dark:text-red-400';
+
+                const shuttleBadgeClass = !shuttle.valid
+                  ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
+                  : 'bg-slate-50 dark:bg-gray-800/50 text-slate-600 dark:text-gray-400 border-slate-200 dark:border-gray-700/40 font-normal text-[9.5px]';
+
+                const statusBadgeClass = ev.elvtrStts === '운행중' 
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50' 
+                  : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';
+
+                // 🎯 [완치 1] 호기 배지 레이아웃 테두리팩 형태로 번호 배지 디자인 일원화 (font-medium 지정)
+                const standardizedBadgeClass = 'bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium border border-slate-200/40 dark:border-gray-600/40 text-[9.5px] shrink-0';
+
+                // 🎯 [완치 2] 최고층/최저층 배지에 whitespace-nowrap을 주입하여 가로 폭 개행 현상을 원천 방어합니다.
+                const topGroundHtml = isTopGround ? `<span class="bg-amber-50/40 dark:bg-amber-950/10 text-amber-600/90 dark:text-amber-500/80 border border-amber-200/30 text-[8.5px] font-normal rounded px-1 shrink-0 whitespace-nowrap">최고층</span>` : '';
+                const deepUndergroundHtml = isDeepUnderground ? `<span class="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-normal rounded px-1 shrink-0 whitespace-nowrap">최저층</span>` : '';
+                const specialSectionHtml = (!shuttle.valid && ev.shuttleSection) ? `<span class="bg-purple-50/60 dark:bg-purple-950/10 text-purple-500 dark:text-purple-400 border border-purple-100/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">특이</span>` : '';
+
+                // 🎯 [완치 3] 최초설치일 분리형 2줄 레이아웃 연산 가드 적용
+                const hasReplacement = ev.frstInstallationDe && ev.installationDe && ev.frstInstallationDe !== ev.installationDe;
+                let dateDisplayHtml = '';
+                if (hasReplacement) {
+                  dateDisplayHtml = `
+                    <div class="flex flex-col gap-0 leading-none">
+                      <span class="text-slate-600 dark:text-gray-400 text-[11px] font-semibold leading-tight">교체 ${formatDate(ev.installationDe)}</span>
+                      <span class="text-slate-400 dark:text-gray-500 text-[9.5px] font-medium leading-tight">최초설치 ${formatDate(ev.frstInstallationDe)}</span>
+                    </div>
+                  `;
+                } else if (ev.installationDe) {
+                  dateDisplayHtml = `
+                    <div class="flex flex-col gap-0 leading-none">
+                      <span class="text-slate-600 dark:text-gray-400 text-[11px] font-medium leading-tight">설치 ${formatDate(ev.installationDe)}</span>
+                    </div>
+                  `;
+                }
+
+                // 🎯 [완치 4] 승강기 종류 배지 스타일 통일화 (font-bold)
+                const kindBadgeHtml = (!settings || settings.elvtrKindNm) && ev.elvtrKindNm
+                  ? `<span class="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded border border-slate-200/40 dark:border-gray-600/40 text-[9.5px] font-bold shrink-0 self-center">${ev.elvtrKindNm}</span>`
+                  : '';
+
+                const bookmarkIconHtml = isRowBookmarked
+                  ? `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="true" class="p-1 rounded transition-all bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 제거"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`
+                  : `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="false" class="p-1 rounded transition-all bg-gray-100/50 text-gray-400 hover:bg-gray-200/50 hover:text-gray-600 dark:bg-gray-700/50 dark:hover:bg-gray-600/50 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 추가"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`;
+
+                const statusBadgeHtml = (!settings || settings.elvtrStts) && ev.elvtrStts
+                  ? `<span class="px-1.5 py-0.25 text-[10.5px] font-bold rounded border tracking-tight ${statusBadgeClass}">${ev.elvtrStts}</span>`
+                  : '';
+
+                return `
+                  <div data-id="${ev.elevatorNo}" class="${rowBgClass} ${rowOpacityClass} w-full text-left flex flex-col p-1.5 rounded-lg border border-transparent cursor-pointer transition-all group space-y-0.5 relative">
+                    <div class="flex items-center justify-between gap-1.5 w-full">
+                      <div class="flex items-center gap-1 min-w-0 overflow-hidden">
+                        <span class="px-1.5 py-0.25 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 text-[9.5px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0 whitespace-nowrap">${displayAsignWithPlace}</span>
+                        <span class="${standardizedBadgeClass}">${formatElevatorNo(ev.elevatorNo)}</span>
+                        ${topGroundHtml}
+                        ${deepUndergroundHtml}
+                        ${specialSectionHtml}
+                      </div>
+                      <div class="shrink-0 flex items-center ml-auto z-10">
+                        ${bookmarkIconHtml}
+                      </div>
+                    </div>
+
+                    <div class="space-y-0.5 w-full min-w-0">
+                      ${(ev.manufacturerName || ev.elvtrModel) ? `
+                        <div class="flex items-center gap-1 min-w-0 text-[13px] mt-0.5">
+                          <span class="text-slate-900 dark:text-gray-100 font-black tracking-tight shrink-0">${ev.manufacturerName}</span>
+                          ${ev.manufacturerName && ev.elvtrModel ? `<span class="text-slate-200 dark:text-gray-700 text-[10px] shrink-0 font-normal">|</span>` : ''}
+                          <span class="${modelColorClass} font-black tracking-tight truncate">${ev.elvtrModel}</span>
+                        </div>
+                      ` : ''}
+                      ${(ev.shuttleSection || ev.ratedSpeed || ev.liveLoad) ? `
+                        <div class="flex items-center gap-1 text-[10.5px] text-slate-400 dark:text-gray-500 font-medium min-w-0 flex-wrap">
+                          <span class="px-1.5 py-0.25 rounded border text-[9.5px] font-bold ${shuttleBadgeClass}">${ev.shuttleSection || '전층'} 운행</span>
+                          <span class="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium">${displaySpeed}</span>
+                          <span class="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium">${displayLoad}</span>
+                        </div>
+                      ` : ''}
+                    </div>
+
+                    <div class="flex items-center justify-between gap-2 pt-1 mt-1 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
+                      <div class="flex items-center gap-1.5">
+                        ${dateDisplayHtml}
+                        ${kindBadgeHtml}
+                      </div>
+                      <div class="flex items-center gap-1 shrink-0">
+                        ${statusBadgeHtml}
+                      </div>
+                    </div>
+
+                  </div>
+                `;
+              }).join('');
+
+              return `
+                <div class="space-y-1">
+                  ${buildingSectionHeader}
+                  <div class="space-y-1">
+                    ${listRows}
+                  </div>
+                </div>
+              `;
+            }).join('');
+
             overlayContent.innerHTML = `
               <div class="flex justify-between items-start mb-1.5 pr-5">
                 <div class="min-w-0 flex-1">
@@ -400,129 +551,8 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
                   <p class="text-[10.5px] text-slate-400 dark:text-gray-400 mt-0.5 font-normal truncate">${cleanAddress}</p>
                 </div>
               </div>
-              <div class="max-h-[195px] overflow-y-auto space-y-1.5 pr-0.5" style="scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
-                ${bldgEntries.map(([bName, evs]) => {
-                  return `
-                    <div class="space-y-1">
-                      ${isMultiBuilding ? `
-                        <div class="flex items-center gap-1.5 px-0.5 py-0 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                          <div class="w-0.5 h-2 bg-blue-500 rounded-full"></div>
-                          <span class="text-[10px] font-semibold text-gray-600 dark:text-gray-400 truncate max-w-[170px]">${bName}</span>
-                          <span class="text-[9px] font-bold text-blue-500 bg-blue-50/60 dark:bg-blue-950/40 px-1 rounded shrink-0">${evs.length}대</span>
-                        </div>
-                      ` : ''}
-                      <div class="space-y-1">
-                        ${evs.map((ev, idx) => {
-                          const shuttle = checkShuttleSection(ev.shuttleSection);
-                          const displaySpeed = formatRatedSpeed(ev.ratedSpeed);
-                          const displayLoad = ev.liveLoad ? String(ev.liveLoad).replace(/kg|KG/gi, '').trim() + ' kg' : '';
-                          const asignNo = (ev.elvtrAsignNo || '').trim().replace(/호기$|호$/, '');
-                          const displayAsign = asignNo ? `${asignNo}호기` : `${idx + 1}호기`;
-
-                          const isRowBookmarked = bookmarkedIds.has(ev.elevatorNo);
-                          const isRowViewed = viewedIds.has(ev.elevatorNo);
-
-                          const maxGround = ev.buildingMaxGround || 0;
-                          const maxUnderground = ev.buildingMaxUnderground || 0;
-                          
-                          const currentGround = parseInt(ev.divGroundFloorCnt) || 0;
-                          const currentUnderground = parseInt(ev.divUndgrndFloorCnt) || 0;
-                          
-                          const showHighestLowest = elevatorsList.length >= 2;
-                          const isTopGround = showHighestLowest && maxGround > 0 && currentGround === maxGround;
-                          const isDeepUnderground = showHighestLowest && maxUnderground > 0 && currentUnderground === maxUnderground;
-
-                          const rowBgClass = isRowBookmarked
-                            ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500'
-                            : isRowViewed
-                            ? 'bg-slate-50/30 dark:bg-slate-900/5 border-l-2 border-l-slate-200/50 dark:border-l-gray-700'
-                            : 'bg-white dark:bg-gray-800 border-l-2 border-l-slate-200/40 dark:border-l-gray-700/40';
-                            
-                          const rowOpacityClass = isRowViewed && !isRowBookmarked ? 'opacity-55' : '';
-
-                          let modelColorClass = 'text-[#8B4513] dark:text-[#EAA850]';
-                          const manu = ev.manufacturerName || '';
-                          if (manu.includes('현대엘')) modelColorClass = 'text-emerald-600 dark:text-emerald-400';
-                          else if (manu.includes('오티스엘')) modelColorClass = 'text-indigo-600 dark:text-indigo-400';
-                          else if (manu.includes('티케이엘')) modelColorClass = 'text-sky-500 dark:text-sky-400';
-                          else if (manu.includes('미쓰비시') || primaryManu.includes('후지테크')) modelColorClass = 'text-red-500 dark:text-red-400';
-
-                          const shuttleBadgeClass = !shuttle.valid
-                            ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
-                            : 'bg-slate-50 dark:bg-gray-700/50 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-gray-600 font-normal text-[9.5px]';
-
-                          const statusBadgeClass = ev.elvtrStts === '운행중' 
-                            ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50' 
-                            : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';
-
-                          const kindBadgeHtml = (!settings || settings.elvtrKindNm) && ev.elvtrKindNm
-                            ? `<span class="px-1 py-0 text-[9.5px] font-normal bg-slate-50/40 dark:bg-gray-700/40 border border-slate-200/40 dark:border-gray-600/30 text-slate-400 dark:text-gray-500 rounded shrink-0">${ev.elvtrKindNm}</span>`
-                            : '';
-
-                          const hasReplacement = ev.frstInstallationDe && ev.installationDe && ev.frstInstallationDe !== ev.installationDe;
-                          const dateDisplayHtml = hasReplacement
-                            ? `<span class="text-slate-600 dark:text-gray-300 font-bold bg-slate-100/80 dark:bg-gray-700/60 px-1 py-0.25 rounded">교체 ${formatDate(ev.installationDe)}</span>`
-                            : ev.installationDe ? `<span>설치 ${formatDate(ev.installationDe)}</span>` : '';
-
-                          const topGroundHtml = isTopGround ? `<span class="bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">최고층</span>` : '';
-                          const deepUndergroundHtml = isDeepUnderground ? `<span class="bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">최저층</span>` : '';
-                          const specialSectionHtml = (!shuttle.valid && ev.shuttleSection) ? `<span class="bg-purple-50/60 dark:bg-purple-950/10 text-purple-500 dark:text-purple-400 border border-purple-100/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">특이</span>` : '';
-
-                          const bookmarkIconHtml = isRowBookmarked
-                            ? `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="true" class="p-1 rounded transition-all bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 제거"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`
-                            : `<button data-bookmark="${ev.elevatorNo}" data-bookmarked="false" class="p-1 rounded transition-all bg-gray-100/50 text-gray-400 hover:bg-gray-200/50 hover:text-gray-600 dark:bg-gray-700/50 dark:hover:bg-gray-600/50 shrink-0 focus:outline-none flex items-center justify-center" title="북마크 추가"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>`;
-
-                          return `
-                            <div data-id="${ev.elevatorNo}" class="${rowBgClass} ${rowOpacityClass} w-full text-left flex flex-col p-1.5 rounded-lg border border-transparent cursor-pointer transition-all group space-y-0.5 relative">
-                              <div class="flex items-center justify-between gap-1.5 w-full">
-                                <div class="flex items-center gap-1 min-w-0 flex-wrap flex-1">
-                                  <span class="px-1 py-0 bg-slate-50 dark:bg-gray-700/60 text-slate-500 dark:text-gray-400 text-[9px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0">${displayAsign}</span>
-                                  <span class="text-[12px] font-bold text-slate-700 dark:text-gray-200 truncate max-w-[110px]">${ev.installationPlace || '위치 미기재'}</span>
-                                  <span class="px-1 py-0 bg-slate-50/50 dark:bg-gray-700/40 text-slate-400 dark:text-gray-500 rounded text-[9.5px] border border-slate-200/30 dark:border-gray-600/30 font-normal shrink-0 tracking-tight">${ev.elevatorNo}</span>
-                                  ${topGroundHtml}
-                                  ${deepUndergroundHtml}
-                                  ${specialSectionHtml}
-                                </div>
-                                <div class="shrink-0 flex items-center ml-auto z-10">
-                                  ${bookmarkIconHtml}
-                                </div>
-                              </div>
-
-                              <div class="space-y-0.5 w-full min-w-0">
-                                ${(ev.manufacturerName || ev.elvtrModel) ? `
-                                  <div class="flex items-center gap-1 min-w-0 text-[13px]">
-                                    <span class="text-slate-800 dark:text-gray-200 font-black tracking-tight truncate max-w-[135px] inline-block shrink-0">${ev.manufacturerName}</span>
-                                    ${ev.manufacturerName && ev.elvtrModel ? `<span class="text-slate-200 dark:text-gray-700 text-[10px] shrink-0 font-normal">|</span>` : ''}
-                                    <span class="${modelColorClass} font-black tracking-tight truncate">${ev.elvtrModel}</span>
-                                  </div>
-                                ` : ''}
-                                ${(ev.shuttleSection || ev.ratedSpeed || ev.liveLoad) ? `
-                                  <div class="flex items-center gap-1 text-[10.5px] text-slate-400 dark:text-gray-500 font-medium min-w-0 flex-wrap">
-                                    <span class="px-1 py-0 rounded border shrink-0 ${shuttleBadgeClass}">${ev.shuttleSection || '전층'} 운행</span>
-                                    <span class="shrink-0">${displaySpeed}</span>
-                                    ${displaySpeed && displayLoad ? `<span class="text-slate-200 dark:text-gray-700 font-normal shrink-0">•</span>` : ''}
-                                    <span class="shrink-0">${displayLoad}</span>
-                                  </div>
-                                ` : ''}
-                              </div>
-
-                              <div class="flex items-center justify-between gap-2 pt-0.5 border-t border-slate-50/60 dark:border-gray-700/40 w-full text-[10.5px] text-slate-400 dark:text-gray-500">
-                                <div class="flex items-center gap-1.5">
-                                  <span>${dateDisplayHtml}</span>
-                                  ${kindBadgeHtml}
-                                </div>
-                                <div class="flex items-center gap-1 shrink-0">
-                                  <span class="px-1.5 py-0 text-[9.5px] font-bold rounded border tracking-tight shrink-0 ${statusBadgeClass}">${ev.elvtrStts || '-'}</span>
-                                </div>
-                              </div>
-
-                            </div>
-                          `;
-                        }).join('')}
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
+              <div class="max-h-[195px] overflow-y-auto overflow-x-hidden space-y-1 pr-0.5" style="scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
+                ${rowsHtml}
               </div>
             `;
 
@@ -601,7 +631,6 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
             }
           });
 
-          // 🎯 마커 대량 바인딩 직후 최초 1회 선착순 300개 가드를 선제 가동합니다.
           updateMarkerVisibility();
 
           if (pendingFocusRef.current && mapInstanceRef.current && isCurrent) {
@@ -636,7 +665,6 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
   return (
     <div ref={wrapperRef} className={`w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-2 shadow-sm relative ${isFullscreen ? 'fixed inset-0 z-50 rounded-none p-0 border-0 flex flex-col' : ''}`}>
       <div ref={mapContainerRef} className={`w-full rounded-xl bg-gray-50 dark:bg-gray-700 relative z-0 ${isFullscreen ? 'flex-1 rounded-none' : ''}`} style={isFullscreen ? { width: '100%', height: '100%' } : { width: '100%', height: '540px' }} />
-      {/* 🎯 [완치] 전체화면 단추가 카카오 기본 컨트롤러와 절대 겹치지 않도록 왼쪽 위 구석(top-4 left-4)으로 완전 격리 정착시켰습니다. */}
       <button
         onClick={toggleFullscreen}
         className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 left-4"

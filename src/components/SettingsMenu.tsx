@@ -3,6 +3,7 @@ import { X, Settings, Trash2, MapPin, Hash, Cpu, Sun, Moon, Monitor, Bookmark, B
 import { SettingsFields, SearchHistory, Bookmark as BookmarkType, BookmarkFolder, ThemeMode, ElevatorWithBadges } from '../types';
 import { useTheme } from '../utils/useTheme';
 import { getBookmarks, removeBookmark, getFolders, createFolder, updateFolder, deleteFolder } from '../utils/bookmarks';
+import { formatElevatorNo } from '../utils/elevatorHelpers';
 import Pagination from './Pagination';
 
 /* ─── [PERMANENT CORE SETTINGS RULES - NEVER DELETE] ───
@@ -277,10 +278,10 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
   // 고유번호 7자리 검색 시 기록이 깨지던 결함 완벽 해결
   const getSearchTitle = (h: any) => {
     if (h.query && h.query.trim()) return h.query.trim();
-    if (h.elevatorNo) return `고유번호: ${h.elevatorNo}`;
-    if (h.elevatorNoQuery) return `고유번호: ${h.elevatorNoQuery}`;
+    if (h.elevatorNo) return `고유번호: ${formatElevatorNo(h.elevatorNo)}`;
+    if (h.elevatorNoQuery) return `고유번호: ${formatElevatorNo(h.elevatorNoQuery)}`;
     const fallbackNo = Object.values(h).find(v => typeof v === 'string' && /^\d{7}$/.test(v));
-    if (fallbackNo) return `고유번호: ${fallbackNo}`;
+    if (fallbackNo) return `고유번호: ${formatElevatorNo(fallbackNo)}`;
     return '고유번호 검색';
   };
 
@@ -446,7 +447,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 shrink-0">
                 {bookmarks.length > 0 && (
                   <button
                     onClick={handleClearAllBookmarks}
@@ -507,7 +508,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                     </div>
                                   )}
                                   <p className="text-[9px] text-gray-400 dark:text-gray-500 font-normal">
-                                    {normalized.elevatorNo}{normalized.displayTimestamp ? ` · ${normalized.displayTimestamp}` : ''}
+                                    {formatElevatorNo(normalized.elevatorNo)}{normalized.displayTimestamp ? ` · ${normalized.displayTimestamp}` : ''}
                                   </p>
                                 </div>
                               </div>
@@ -611,7 +612,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                               </div>
                                             )}
                                             <p className="text-[9px] text-gray-400 dark:text-gray-500 font-normal">
-                                              {normalized.elevatorNo}{normalized.displayTimestamp ? ` · ${normalized.displayTimestamp}` : ''}
+                                              {formatElevatorNo(normalized.elevatorNo)}{normalized.displayTimestamp ? ` · ${normalized.displayTimestamp}` : ''}
                                             </p>
                                           </div>
                                         </div>
@@ -683,7 +684,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 shrink-0">
                 {searchHistory.length > 0 && (
                   <button
                     onClick={clearSearchHistory}
@@ -773,7 +774,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 shrink-0">
                 {viewHistory.length > 0 && (
                   <button
                     onClick={clearViewHistory}
@@ -832,7 +833,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                   </div>
                                 )}
                                 <p className="text-[9px] text-gray-400 dark:text-gray-500 font-normal">
-                                  {normalized.elevatorNo} · {normalized.displayTimestamp}
+                                  {formatElevatorNo(normalized.elevatorNo)} · {normalized.displayTimestamp}
                                 </p>
                               </div>
                             </div>

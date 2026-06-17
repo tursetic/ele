@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Settings, Map as MapIcon, List, AlertCircle, Bell, XCircle, Sliders } from 'lucide-react';
 import { Elevator as ElevatorType, ElevatorWithBadges, SettingsFields, SearchHistory, FilterOptions, SearchTab, GeoGroup } from './types';
 import { searchByElevatorNo, searchByAddress, geocodeAddress } from './utils/api';
-import { sortElevators, assignBadges, collectFilterOptions, parseRatedSpeed, formatRatedSpeed, extractYear, formatDate } from './utils/elevatorHelpers';
+import { sortElevators, assignBadges, collectFilterOptions, parseRatedSpeed, formatRatedSpeed, formatElevatorNo, extractYear, formatDate } from './utils/elevatorHelpers';
 import { getBookmarkedElevatorNos, getAllBookmarkChanges, markChangeNotified, BookmarkChange, subscribeToChanges, clearGlobalChanges } from './utils/bookmarks';
 
 // ★ [누락 해결] 건물 레이어 전용 격리 지도를 최상단에 명확하게 로드하여 ReferenceError 원천 차단
@@ -222,6 +222,72 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeToChanges(setBookmarkChanges);
     return unsubscribe;
+  }, []);
+
+  // 🎯 [완치 자동화] 앱이 켜질 때 사용자가 아무 행동을 하지 않아도 하루에 단 '한 번'만 북마크를 백그라운드 전수 자동 스캔합니다.
+  useEffect(() => {
+    const runBackgroundBookmarkCheck = async () => {
+      try {
+        // 1. 금일 자정 기준 '하루에 한 번만 실행' 세션 락다운 검증
+        const todayStr = new Date().toISOString().slice(0, 10); // 형식: YYYY-MM-DD
+        const lastCheckDate = localStorage.getItem('brelev_last_bookmark_check_date');
+        if (lastCheckDate === todayStr) return; // 오늘 이미 전수 검사를 마쳤다면 즉시 스텔스 종료 (트래픽 완벽 방어)
+
+        // 2. 기기에 저장된 북마크 원본 명단 스캔
+        const storedRaw = localStorage.getItem('brelev_local_bookmarks_v1');
+        if (!storedRaw) {
+          localStorage.setItem('brelev_last_bookmark_check_date', todayStr);
+          return;
+        }
+
+        const storedBookmarks = JSON.parse(storedRaw) as any[];
+        if (!Array.isArray(storedBookmarks) || storedBookmarks.length === 0) {
+          localStorage.setItem('brelev_last_bookmark_check_date', todayStr);
+          return;
+        }
+
+        let accumulatedChanges: any[] = [];
+        const { detectBookmarkChanges, updateBookmarkData } = await import('./utils/bookmarks');
+
+        // 3. 각 북마크 고유번호에 대해 순차적/병렬적 API 비동기 크롤링 기동
+        const scanPromises = storedBookmarks.map(async (bm) => {
+          const elvNo = bm.elevator_no || bm.elevatorNo;
+          if (!elvNo) return;
+
+          try {
+            // v25.1 버전의 순정 7자리 데이터 조회 호출 (api.ts 캐시 레이어 연동)
+            const res = await searchByElevatorNo(elvNo.toString().trim());
+            if (res && res.items && res.items.length > 0) {
+              const latestData = res.items[0];
+
+              // 기존 모달에만 갇혀있던 변경점 대조 함수를 전역 기점으로 링킹
+              const detected = detectBookmarkChanges(latestData);
+              if (detected && detected.length > 0) {
+                updateBookmarkData(latestData); // 로컬 저장소 최신화
+                accumulatedChanges.push(...detected);
+              }
+            }
+          } catch (err) {
+            console.error(`[Background Sync] 승강기 번호 ${elvNo} 조회 실패:`, err);
+          }
+        });
+
+        await Promise.all(scanPromises);
+
+        // 4. 격차가 발견된 최종 항목이 있다면 상단 배너 알림 트리거 작동
+        if (accumulatedChanges.length > 0) {
+          const { setGlobalChanges } = await import('./utils/bookmarks');
+          setGlobalChanges(accumulatedChanges);
+        }
+
+        // 5. 오늘 날짜에 대한 스캔 승인 도장 각인
+        localStorage.setItem('brelev_last_bookmark_check_date', todayStr);
+      } catch (error) {
+        console.error('[Background Bookmark Check Error]', error);
+      }
+    };
+
+    runBackgroundBookmarkCheck();
   }, []);
 
   const handleDismissChanges = useCallback(() => {
@@ -788,7 +854,7 @@ export default function App() {
   const activeTotalPages = isSecretSearch ? Math.ceil(displayResults.length / ROWS_PER_PAGE) : totalPages;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col max-w-2xl mx-auto">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col max-w-2xl mx-auto pb-16 relative">
       <header className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 px-4 py-3 flex items-center justify-between sticky top-0 z-[100] shadow-sm">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center">
@@ -823,7 +889,7 @@ export default function App() {
             <div className="mt-1 space-y-0.5">
               {bookmarkChanges.map((c, idx) => (
                 <p key={idx} className="text-xs text-amber-700 dark:text-amber-300">
-                  <span className="font-medium">{c.building_name || c.elevator_no}</span>: {
+                  <span className="font-medium">{c.building_name || formatElevatorNo(c.elevator_no)}</span>: {
                   c.changeType === 'model' && `모델명 ${c.oldValue} → ${c.newValue}`}
                   {c.changeType === 'installation' && `설치일자 ${formatDate(c.oldValue)} → ${formatDate(c.newValue)}`}
                   {c.changeType === 'inspection' && `검사종류 ${c.oldValue} → ${c.newValue}`}
@@ -883,7 +949,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 flex flex-col overflow-y-auto">
+      <main className="flex-1 flex flex-col overflow-y-auto pb-6">
         {/* 🛡️ [Keep-Alive 장착] DOM 파괴를 차단하고 hidden 클래스로 감추어 지도 위치 영구 보존 및 북마크 연동 완료 */}
         <div className={`p-4 flex-1 flex flex-col ${searchTab === 'mapSearch' ? '' : 'hidden'}`}>
           <BuildingLayerMap
@@ -1046,6 +1112,36 @@ export default function App() {
           onHideEscalatorChange={setHideEscalator}
         />
       )}
+
+      {/* 🎯 [인스타그램 스타일 하단 탭바] 화면 하단에 늘 고정되며 다크모드를 완벽하게 지원하는 내비게이션 인터페이스 */}
+      <nav className="fixed bottom-0 left-0 right-0 z-[150] max-w-2xl mx-auto bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 flex items-center justify-around h-16 px-2 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]">
+        <button
+          type="button"
+          onClick={() => handleTabChange('elevatorNo')}
+          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-colors ${searchTab === 'elevatorNo' ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-400 dark:text-gray-500 font-medium'}`}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>
+          <span className="text-[10px]">번호 검색</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleTabChange('address')}
+          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-colors ${searchTab === 'address' ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-400 dark:text-gray-500 font-medium'}`}
+        >
+          <List size={18} />
+          <span className="text-[10px]">주소 검색</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleTabChange('mapSearch')}
+          className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-colors ${searchTab === 'mapSearch' ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-400 dark:text-gray-500 font-medium'}`}
+        >
+          <MapIcon size={18} />
+          <span className="text-[10px]">지도 검색</span>
+        </button>
+      </nav>
     </div>
   );
 }

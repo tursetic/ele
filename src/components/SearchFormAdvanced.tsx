@@ -1,6 +1,7 @@
 import React from 'react';
-import { Search, Hash, MapPin, Map as MapIcon } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { SearchTab } from '../types';
+import { formatElevatorNo } from '../utils/elevatorHelpers';
 
 interface Props {
   tab: SearchTab;
@@ -37,43 +38,6 @@ export default function SearchFormAdvanced({
 
   return (
     <div className="bg-white dark:bg-gray-800 px-4 pt-4 pb-2.5 shadow-sm space-y-2 shrink-0">
-      {/* Tab Switcher - 명칭 다이어트 완료 */}
-      <div className="flex bg-gray-100 dark:bg-gray-700 rounded-xl p-1 mb-1">
-        <button
-          onClick={() => onTabChange('elevatorNo')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all ${
-            tab === 'elevatorNo'
-              ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-400 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-          }`}
-        >
-          <Hash size={14} />
-          번호 검색
-        </button>
-        <button
-          onClick={() => onTabChange('address')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all ${
-            tab === 'address'
-              ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-400 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-          }`}
-        >
-          <MapPin size={14} />
-          주소 검색
-        </button>
-        <button
-          onClick={() => onTabChange('mapSearch')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all ${
-            tab === 'mapSearch'
-              ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-400 shadow-sm'
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-          }`}
-        >
-          <MapIcon size={14} />
-          지도 검색
-        </button>
-      </div>
-
       {/* 5) 옅은 외곽 박스를 완벽히 철거하고 높이 마진을 최소화한 슬림 텍스트 가이드 라인 */}
       {tab === 'mapSearch' ? (
         <div className="text-center py-0.5">
@@ -86,15 +50,14 @@ export default function SearchFormAdvanced({
           <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">승강기 고유번호 (7자리)</label>
           <input
             type="text"
-            value={elevatorNoQuery}
-            // 🎯 [수정] 정규식을 이용하여 숫자가 아닌 문자가 유입되는 순간 흔적 없이 실시간 파괴 처리합니다.
+            value={formatElevatorNo(elevatorNoQuery)}
             onChange={(e) => {
               const onlyNums = e.target.value.replace(/[^0-9]/g, '');
-              onElevatorNoQueryChange(onlyNums);
+              onElevatorNoQueryChange(onlyNums.slice(0, 7));
             }}
             onKeyDown={handleKeyDown}
-            placeholder="예: 1234567"
-            maxLength={7}
+            placeholder="예: 0000-001"
+            maxLength={8}
             className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
           />
         </div>

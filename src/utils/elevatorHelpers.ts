@@ -1,5 +1,12 @@
 import { Elevator, ElevatorWithBadges, FilterOptions } from '../types';
 
+export function formatElevatorNo(no?: string | null): string {
+  if (!no) return '';
+  const clean = no.replace(/[^0-9]/g, '');
+  if (clean.length === 7) return `${clean.slice(0, 4)}-${clean.slice(4)}`;
+  return no;
+}
+
 export function assignBadges(elevators: Elevator[]): ElevatorWithBadges[] {
   // Badges are meaningless for a single elevator (e.g. 고유번호 search)
   if (elevators.length <= 1) {

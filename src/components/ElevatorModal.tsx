@@ -6,7 +6,7 @@ import {
 import { ElevatorWithBadges, InspectionRecord, SettingsFields, BookmarkFolder } from '../types';
 import { fetchInspectionHistory } from '../types'; // App.tsx의 유입 구조 상속 동기화
 import { fetchInspectionHistory as fetchHistoryApi } from '../utils/api';
-import { checkShuttleSection, formatDate, formatRatedSpeed, getStatusBadgeClass } from '../utils/elevatorHelpers';
+import { checkShuttleSection, formatDate, formatRatedSpeed, formatElevatorNo, getStatusBadgeClass } from '../utils/elevatorHelpers';
 import { addBookmark, removeBookmark, isBookmarked, detectBookmarkChanges, updateBookmarkData, setGlobalChanges, getFolders, createFolder } from '../utils/bookmarks';
 
 interface Props {
@@ -252,13 +252,13 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Building2 size={14} className="text-blue-500 shrink-0" />
                 <h2 className="text-[14.5px] font-black text-gray-900 dark:text-gray-100 truncate tracking-tight">{el.buldNm || '건물명 없음'}</h2>
-                {el.isTopGround && <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-bold rounded px-1 shrink-0">최고층</span>}
-                {el.isDeepUnderground && <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-bold rounded px-1 shrink-0">최저층</span>}
+                {el.isTopGround && <span className="bg-amber-50/40 dark:bg-amber-950/10 text-amber-600/90 dark:text-amber-500/80 border border-amber-200/30 text-[8.5px] font-normal rounded px-1 shrink-0">최고층</span>}
+                {el.isDeepUnderground && <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-normal rounded px-1 shrink-0">최저층</span>}
               </div>
               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                 {s.elvtrStts && el.elvtrStts && <span className={`px-1.5 py-0.25 text-[10px] font-bold rounded border tracking-tight ${statusBadgeClass}`}>{el.elvtrStts}</span>}
-                <span className="px-1.5 py-0.25 bg-slate-100 dark:bg-gray-800 border border-slate-200/40 dark:border-gray-700 text-slate-600 dark:text-gray-300 text-[10px] font-bold rounded shrink-0">{displayAsignWithPlace}</span>
-                <span className="px-1.5 py-0.25 bg-slate-50/50 dark:bg-gray-800/40 text-slate-400 dark:text-gray-500 rounded text-[9px] border border-slate-200/30 dark:border-gray-700/30 font-normal shrink-0 tracking-tight">{el.elevatorNo}</span>
+                <span className="px-1.5 py-0.25 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 text-[9.5px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0">{displayAsignWithPlace}</span>
+                <span className="px-1.5 py-0.25 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 text-[9.5px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0 tracking-tight">{formatElevatorNo(el.elevatorNo)}</span>
               </div>
             </div>
             <div className="flex items-center gap-0.5 shrink-0 relative">
@@ -366,9 +366,9 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
             </div>
 
             <div className="flex items-center gap-1.5 text-[11px] font-bold flex-wrap">
-              <span className="px-1.5 py-0.25 rounded text-[9.5px] bg-slate-50 dark:bg-gray-700 text-slate-500 dark:text-gray-400 border border-slate-200 shrink-0 font-bold">{el.shuttleSection || '전층'} 운행</span>
-              <span className="bg-slate-50 dark:bg-gray-700/60 text-slate-600 dark:text-gray-300 px-1.5 py-0.25 rounded">{formatRatedSpeed(el.ratedSpeed)}</span>
-              <span className="bg-slate-50 dark:bg-gray-700/60 text-slate-600 dark:text-gray-300 px-1.5 py-0.25 rounded">{el.liveLoad || '-'}</span>
+              <span className={`px-1.5 py-0.25 rounded border text-[9.5px] font-bold ${`shuttle` in window && !(window as any).shuttle?.valid ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50' : 'bg-slate-50 dark:bg-gray-800/50 text-slate-600 dark:text-gray-400 border-slate-200 dark:border-gray-700/40'}`}>{el.shuttleSection || '전층'} 운행</span>
+              <span className="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded text-[10.5px] font-bold">{formatRatedSpeed(el.ratedSpeed)}</span>
+              <span className="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded text-[10.5px] font-bold">{el.liveLoad ? `${String(el.liveLoad).replace(/kg/gi, '').trim()} kg` : '-'}</span>
             </div>
 
             <div className="text-[11px] text-slate-400 dark:text-gray-500 pt-0.5 border-t border-slate-100 dark:border-gray-700/60 flex items-center justify-between">
@@ -481,12 +481,11 @@ export default function ElevatorModal({ elevator: el, settings: s, onClose, onNa
                       {/* 🎯 [완치 3] 배지 간의 수평 정렬 간격을 gap-1.5에서 gap-1로 좁혀 파편화 소멸 */}
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1 min-w-0 flex-1">
-                          {/* 🎯 [완치 2] 검사 종류 배지의 다크모드 테두리 보더 투명 명도 교정 (dark:border-gray-600) */}
                           <span className="px-1 py-0.5 rounded bg-slate-50 dark:bg-gray-700 text-slate-600 dark:text-gray-300 border border-slate-200 dark:border-gray-600 text-[10.5px] font-bold shrink-0">{record.inspctKind || '-'}</span>
-                          <span className={`px-1.5 py-0.5 rounded font-bold text-[10.5px] shrink-0 whitespace-nowrap ${resultChip}`}>{record.psexamYn}</span>
+                          <span className={`px-1.5 py-0.5 rounded font-normal text-[10.5px] shrink-0 whitespace-nowrap ${resultChip}`}>{record.psexamYn}</span>
                           <p className="text-slate-400/70 dark:text-gray-500/70 text-[9.5px] font-normal truncate flex-1 min-w-0 ml-0.5">{record.inspctInsttNm || '-'}</p>
                         </div>
-                        <span className="font-black shrink-0 text-[10.5px] text-slate-600 dark:text-gray-400 tracking-tight">{formatDate(record.inspctDt)}</span>
+                        <span className="font-normal shrink-0 text-[10.5px] text-slate-600 dark:text-gray-400 tracking-tight">{formatDate(record.inspctDt)}</span>
                       </div>
                       
                       {/* 🎯 [완치 4] 줄 간격 마진 패딩 최소 밀착 오더 완치 (mt-0 및 leading-tight 제어 추가) */}

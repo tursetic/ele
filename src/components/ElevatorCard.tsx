@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { ElevatorWithBadges, SettingsFields } from '../types';
-import { checkShuttleSection, formatDate, formatRatedSpeed, getStatusBadgeClass } from '../utils/elevatorHelpers';
+import { checkShuttleSection, formatDate, formatRatedSpeed, formatElevatorNo, getStatusBadgeClass } from '../utils/elevatorHelpers';
 import BookmarkButton from './BookmarkButton';
 
 /* ─── [PERMANENT CORE DESIGN RULES - NEVER DELETE] ───
@@ -43,12 +43,12 @@ export default function ElevatorCard({
 
   const isMulti = elevators.length > 1;
 
-  // 🎯 [완치 2번] 다크 모드 눈부심 완전 차단: 저대비 명도로 배지 컬러셋 전면 다운 그레이드 조정
-  const standardizedBadgeClass = 'bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium border-0 text-[10.5px]';
+  // 🎯 [완치 1] 승강기 번호 배지 디자인을 호기 배지와 동일한 스타일(배경/테두리/크기)로 일원화하고 font-medium 유지
+  const standardizedBadgeClass = 'bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-bold border border-slate-200/40 dark:border-gray-600/40 text-[9.5px] shrink-0';
 
-  // 🎯 [완치 3번] 최고층 배지 은은한 극강의 미세 틴트 적용 (무채색 베이스에 혈색만 주입)
-  const topGroundBadgeHtml = <span className="bg-amber-50/40 dark:bg-amber-950/10 text-amber-600/90 dark:text-amber-500/80 border border-amber-200/30 text-[8.5px] font-bold rounded px-1 shrink-0">최고층</span>;
-  const deepUndergroundBadgeHtml = <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-bold rounded px-1 shrink-0">최저층</span>;
+  // 🎯 요청사항 반영: 최고층/최저층 배지에서 볼드(font-bold) 제거 후 font-normal 일원화
+  const topGroundBadgeHtml = <span className="bg-amber-50/40 dark:bg-amber-950/10 text-amber-600/90 dark:text-amber-500/80 border border-amber-200/30 text-[8.5px] font-normal rounded px-1 shrink-0">최고층</span>;
+  const deepUndergroundBadgeHtml = <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-normal rounded px-1 shrink-0">최저층</span>;
 
   // 1) 단독 카드 레이아웃 브랜치 (elevators.length === 1)
   if (!isMulti) {
@@ -59,6 +59,9 @@ export default function ElevatorCard({
     const statusBadgeClass = getStatusBadgeClass(el.elvtrStts || '');
     const modelColorClass = getModelColorClass(el.manufacturerName);
     const hasReplacement = el.frstInstallationDe && el.installationDe && el.frstInstallationDe !== el.installationDe;
+
+    const gFloor = parseInt(el.divGroundFloorCnt, 10) || 0;
+    const uFloor = parseInt(el.divUndgrndFloorCnt, 10) || 0;
 
     const asignNo = (el.elvtrAsignNo || '').trim().replace(/호기$|호$/, '');
     const displayAsign = asignNo ? `${asignNo}호기` : '1호기';
@@ -76,19 +79,14 @@ export default function ElevatorCard({
       ? 'bg-white dark:bg-gray-800 border-l-4 border-l-slate-300 dark:border-l-gray-600 border-y-slate-200 border-r-slate-200 dark:border-y-gray-800 dark:border-r-gray-800 opacity-70 shadow-xs'
       : 'bg-white dark:bg-gray-800 border-slate-200 dark:border-gray-700/50 shadow-sm';
 
-    // 🎯 [완치 1번 단독 플러그] 단독 건물 내 승강기의 지상/지하 층수 코드 분출 가드 수식
-    const gFloor = parseInt(el.divGroundFloorCnt, 10) || 0;
-    const uFloor = parseInt(el.divUndgrndFloorCnt, 10) || 0;
-
     return (
       <div
         onClick={() => onSelect(el)}
         className={`border rounded-xl px-2.5 py-2 ${rowBgClass} hover:shadow-md transition-all cursor-pointer flex flex-col gap-0 relative group`}
       >
-        {/* 상단 라인: 건물명 및 주소 (mt-0 gap-0 분량 초밀착 정렬) */}
+        {/* 상단 라인: 건물명 및 주소 */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1 flex flex-col gap-0">
-            {/* 🎯 [완치 1번] 엉터리 레이아웃 철거 후 건물명 오른쪽에 미니멀 층수 배지 자동 링킹 */}
             <div className="flex items-baseline gap-1.5 flex-wrap">
               <h3 className="text-[13.5px] font-black text-gray-900 dark:text-gray-100 truncate tracking-tight">{buildingName}</h3>
               <div className="text-[11px] text-slate-400 dark:text-gray-500 font-bold tracking-tight flex items-center gap-1 shrink-0">
@@ -111,7 +109,7 @@ export default function ElevatorCard({
             {displayAsignWithPlace}
           </span>
           <span className={standardizedBadgeClass}>
-            {el.elevatorNo}
+            {formatElevatorNo(el.elevatorNo)}
           </span>
         </div>
 
@@ -130,14 +128,21 @@ export default function ElevatorCard({
           </div>
         </div>
 
-        {/* 하단선 및 배지 마감구역 */}
+        {/* 🎯 하단 마감구역: ElevatorModal의 '교체/최초설치 분리 2줄' 레이아웃 및 'font-bold 승강기 종류 배지 스타일' 이식 완료 */}
         <div className="flex items-center justify-between gap-2 pt-1 mt-1 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11.5px] text-slate-400 dark:text-gray-500 font-normal">
-              {hasReplacement ? <span className="text-slate-600 dark:text-gray-400 font-black bg-slate-100/80 dark:bg-gray-700/40 px-1 py-0.25 rounded">교체 {formatDate(el.installationDe)}</span> : el.installationDe ? <span>설치 {formatDate(el.installationDe)}</span> : null}
-            </span>
+            <div className="flex flex-col gap-0 leading-none">
+              {hasReplacement ? (
+                <>
+                  <span className="text-slate-600 dark:text-gray-400 text-[11px] font-semibold leading-tight">교체 {formatDate(el.installationDe)}</span>
+                  <span className="text-slate-400 dark:text-gray-500 text-[9.5px] font-medium leading-tight">최초설치 {formatDate(el.frstInstallationDe)}</span>
+                </>
+              ) : el.installationDe ? (
+                <span className="text-slate-600 dark:text-gray-400 text-[11px] font-medium leading-tight">설치 {formatDate(el.installationDe)}</span>
+              ) : null}
+            </div>
             {settings.elvtrKindNm && el.elvtrKindNm && (
-              <span className={standardizedBadgeClass}>
+              <span className="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded border-0 text-[10.5px] font-bold shrink-0 self-center">
                 {el.elvtrKindNm}
               </span>
             )}
@@ -154,7 +159,6 @@ export default function ElevatorCard({
   const isGroupBookmarked = elevators.some(e => bookmarkedIds.has(e.elevatorNo));
   const isGroupViewed = elevators.some(e => viewedIds.has(e.elevatorNo));
 
-  // 복합 건물 소속 승강기들의 최대 빌딩 층수 역추적 가공 연산회로
   const maxGroundFloor = Math.max(...elevators.map(e => parseInt(e.divGroundFloorCnt, 10) || 0));
   const maxUndergroundFloor = Math.max(...elevators.map(e => parseInt(e.divUndgrndFloorCnt, 10) || 0));
 
@@ -169,7 +173,6 @@ export default function ElevatorCard({
       {/* 복합 카드 상단 헤더 구역 */}
       <div className={`px-2.5 py-1.5 border-b border-slate-200 dark:border-gray-700 flex items-start justify-between gap-2 ${groupHeaderBg}`}>
         <div className="min-w-0 flex-1 flex flex-col gap-0">
-          {/* 🎯 [완치 1번] 복합 빌딩 카드에서도 불필요한 바 선을 파괴하고, 주소창과 겹치지 않게 제목 타이틀 옆구리에 기호식으로 초밀착 이식 */}
           <div className="flex items-baseline gap-1.5 flex-wrap">
             <h3 className="text-[13.5px] font-black text-gray-900 dark:text-gray-100 truncate tracking-tight">{buildingName}</h3>
             <div className="text-[11px] text-slate-400 dark:text-gray-500 font-bold tracking-tight flex items-center gap-1 shrink-0">
@@ -224,9 +227,8 @@ export default function ElevatorCard({
                 <div className="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
                   <span className="px-1.5 py-0.25 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 text-[9.5px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0">{displayAsignWithPlace}</span>
                   <span className={standardizedBadgeClass}>
-                    {el.elevatorNo}
+                    {formatElevatorNo(el.elevatorNo)}
                   </span>
-                  {/* 🎯 [완치 3번] 보정 완료된 초미세 오렌지 틴트 귤빛 배지 매핑 결합 */}
                   {el.isTopGround && topGroundBadgeHtml}
                   {el.isDeepUnderground && deepUndergroundBadgeHtml}
                 </div>
@@ -247,13 +249,21 @@ export default function ElevatorCard({
                 <span className="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium">{el.liveLoad ? `${String(el.liveLoad).replace(/kg/gi, '').trim()} kg` : '-'}</span>
               </div>
 
+              {/* 🎯 복합 목록 내부 마감구역: ElevatorModal의 '교체/최초설치 분리 2줄' 및 'font-bold 승강기 종류 배지 스타일' 완벽 동기화 이식 */}
               <div className="flex items-center justify-between gap-2 pt-0.5 mt-0.5 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11.5px] text-slate-400 dark:text-gray-500 font-normal">
-                    {hasReplacement ? <span className="text-slate-600 dark:text-gray-300 font-black bg-slate-100/80 dark:bg-gray-700/40 px-1 py-0.25 rounded">교체 {formatDate(el.installationDe)}</span> : el.installationDe ? <span>설치 {formatDate(el.installationDe)}</span> : null}
-                  </span>
+                  <div className="flex flex-col gap-0 leading-none">
+                    {hasReplacement ? (
+                      <>
+                        <span className="text-slate-600 dark:text-gray-400 text-[11px] font-semibold leading-tight">교체 {formatDate(el.installationDe)}</span>
+                        <span className="text-slate-400 dark:text-gray-500 text-[9.5px] font-medium leading-tight">최초설치 {formatDate(el.frstInstallationDe)}</span>
+                      </>
+                    ) : el.installationDe ? (
+                      <span className="text-slate-600 dark:text-gray-400 text-[11px] font-medium leading-tight">설치 {formatDate(el.installationDe)}</span>
+                    ) : null}
+                  </div>
                   {settings.elvtrKindNm && el.elvtrKindNm && (
-                    <span className={standardizedBadgeClass}>
+                    <span className="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded border-0 text-[10.5px] font-bold shrink-0 self-center">
                       {el.elvtrKindNm}
                     </span>
                   )}
