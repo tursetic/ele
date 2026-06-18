@@ -150,6 +150,7 @@ export async function fetchInspectionHistory(elevatorNo: string, pageNo: number 
   return result;
 }
 
+// Singleton promise so kakao.maps.load() is called at most once
 let kakaoLoadPromise: Promise<void> | null = null;
 
 export function ensureKakaoReady(): Promise<void> {
@@ -176,7 +177,13 @@ export function ensureKakaoReady(): Promise<void> {
     console.log("▶ [Kakao] 불필요한 프록시 제거 -> CDN 직통 및 Referrer 강제 주입 우회 개시");
     const script = document.createElement('script');
     script.type = 'text/javascript';
+    
+    // ★ 프록시 우회 경로 전면 폐기하고 공식 카카오 CDN 주소로 직통 연결합니다.
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&libraries=services&autoload=false`;
+    
+    // ★ [CORS 차단 해제 치트키] crossOrigin 속성을 "절대" 명시하지 않는 것이 핵심입니다!
+    // 표준 script 태그는 crossOrigin을 빼면 CORS 검사 대상에서 완전히 제외되어 통과됩니다.
+    // 그러면서 referrerpolicy만 unsafe-url로 고정하면, 브라우저가 Referer 헤더를 누락 없이 완벽히 쥐어 보냅니다.
     script.referrerPolicy = 'unsafe-url'; 
     script.async = true;
     script.defer = true;
@@ -238,6 +245,8 @@ export function geocodeAddress(address: string, signal?: AbortSignal): Promise<[
     });
 }
 
+// src/utils/api.ts 파일 맨 하단에 그대로 추가해 주세요.
+
 export interface EleBuildingFeature {
   type: 'Feature';
   id: string;
@@ -256,6 +265,7 @@ export interface EleBuildingFeature {
   };
 }
 
+// 📐 수학적 발견: 외부 무거운 GIS 라이브러리 없이 구면 메르카토르 미터 좌표계로 정밀 변환
 export function convertWGS84ToEPSG3857(lng: number, lat: number): [number, number] {
   const x = (lng * 20037508.34) / 180;
   let y = Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) / (Math.PI / 180);
@@ -284,7 +294,7 @@ export async function fetchEleBuildings(
     OUTPUTFORMAT: 'application/json',
     TYPENAME: typeName,
     BBOX: bboxParam,
-    VIEWPARAMS: viewparamsParam
+    VIEWPARAMS: viewparamsParam // 🎯 완치 가드: q와 limit 둘 다 SQL View 기반이므로 조건문 없이 무조건 주입합니다.
   });
 
   const url = `${baseUrl}?${params.toString()}`;
@@ -294,69 +304,4 @@ export async function fetchEleBuildings(
   
   const data = await res.json();
   return data.features || [];
-}
-
-export interface SearchBuildingResult {
-  BULD_NM: string;
-  ADDRESS: string;
-  X_CORDNT: number;
-  Y_CORDNT: number;
-}
-
-/**
- * 🎯 [CORS / 방화벽 원천 해제형 고성능 텍스트 엔진]
- * 차단막이 심한 POST 주소를 버리고, 100% 뚫려있는 순정 WFS proxy를 활용하여 
- * 건물명 및 주소를 고속 색출하고 좌표쌍(WGS84)을 정밀 추출합니다.
- */
-export async function searchEleBuildings(keyword: string, signal?: AbortSignal): Promise<SearchBuildingResult[]> {
-  const trimmed = keyword.trim();
-  if (!trimmed) return [];
-
-  // 승강기 고유 번호(7자리 숫자) 판정 시 공공데이터 조회 후 주소 기점 주소 변환 우회 연동
-  if (/^\d{7}$/.test(trimmed)) {
-    try {
-      const res = await searchByElevatorNo(trimmed, 1, signal);
-      if (res && res.items && res.items.length > 0) {
-        const item = res.items[0];
-        const addr = item.address1 || item.address2 || '';
-        if (addr) {
-          const coords = await geocodeAddress(addr, signal);
-          if (coords) {
-            return [{
-              BULD_NM: item.buldNm || '건물명 미기재',
-              ADDRESS: addr,
-              X_CORDNT: coords[0],
-              Y_CORDNT: coords[1]
-            }];
-          }
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return [];
-  }
-
-  // 일반 건물명 및 주소 텍스트 검색 시 오픈 WFS 파이프라인 우회 태우기
-  const params = new URLSearchParams({
-    SERVICE: 'WFS',
-    VERSION: '1.0.0',
-    REQUEST: 'GetFeature',
-    OUTPUTFORMAT: 'application/json',
-    TYPENAME: 'koelsadp:building_q',
-    CQL_FILTER: `BULD_NM ILIKE '%${trimmed}%' OR ADDRESS ILIKE '%${trimmed}%'`
-  });
-
-  const res = await fetch(`/api/proxy?${params.toString()}`, { signal });
-  if (!res.ok) throw new Error(`WFS Search error! status: ${res.status}`);
-
-  const data = await res.json();
-  const features = data.features || [];
-
-  return features.map((f: any) => ({
-    BULD_NM: f.properties.BULD_NM ? f.properties.BULD_NM.trim() : '건물명 미기재',
-    ADDRESS: f.properties.ADDRESS ? f.properties.ADDRESS.trim() : '주소 미기재',
-    X_CORDNT: f.geometry.coordinates[1], // Latitude
-    Y_CORDNT: f.geometry.coordinates[0]  // Longitude
-  }));
 }
