@@ -308,19 +308,19 @@ export async function searchEleBuildings(keyword: string, signal?: AbortSignal):
 
   const baseUrl = "/api/search";
   
-  const paramListObj = {
-    type: "json",
-    paramList: [{ param: keyword.trim() }]
-  };
-
+  // 🎯 실측 패킷 명세(image_1aa12b.png)와 100% 일치하도록 data 내부의 paramList만 이중 직렬화합니다.
   const bodyObj = {
-    data: JSON.stringify(paramListObj)
+    data: {
+      type: "json",
+      paramList: JSON.stringify([{ param: keyword.trim() }])
+    }
   };
 
   const res = await fetch(baseUrl, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/plain, */*'
     },
     body: JSON.stringify(bodyObj),
     signal

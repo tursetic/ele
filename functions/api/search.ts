@@ -1,7 +1,6 @@
 export async function onRequest(context: any) {
   const { request } = context;
   
-  // 브라우저의 CORS 프리플라이트(OPTIONS) 요청 승인 처리
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       headers: {
@@ -22,16 +21,14 @@ export async function onRequest(context: any) {
   const targetUrl = "https://eledata.koelsa.or.kr/dataManage/select/dataset/NDL250923162856333";
 
   try {
-    // 프런트엔드에서 전송한 본문 문자열을 그대로 확보합니다.
     const requestBody = await request.text();
 
-    // Cloudflare 인프라 권한으로 엘리데이터 대상 서버에 직접 POST 통신을 수행합니다.
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json', // 🎯 통신 타입을 application/json 표준 규격으로 선언합니다.
         'Referer': 'https://eledata.koelsa.or.kr/',
         'Origin': 'https://eledata.koelsa.or.kr'
       },
@@ -40,7 +37,6 @@ export async function onRequest(context: any) {
 
     const responseData = await response.text();
     
-    // 수집된 정품 JSON 행렬 데이터를 클라이언트에 CORS 허용 헤더와 함께 반환합니다.
     return new Response(responseData, {
       status: response.status,
       statusText: response.statusText,
