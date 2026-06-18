@@ -303,31 +303,60 @@ export interface SearchBuildingResult {
   Y_CORDNT: number;
 }
 
+/**
+ * 🎯 [CORS / 방화벽 원천 해제형 고성능 텍스트 엔진]
+ * 차단막이 심한 POST 주소를 버리고, 100% 뚫려있는 순정 WFS proxy를 활용하여 
+ * 건물명 및 주소를 고속 색출하고 좌표쌍(WGS84)을 정밀 추출합니다.
+ */
 export async function searchEleBuildings(keyword: string, signal?: AbortSignal): Promise<SearchBuildingResult[]> {
-  if (!keyword.trim()) return [];
+  const trimmed = keyword.trim();
+  if (!trimmed) return [];
 
-  const baseUrl = "/api/search";
-  
-  // 🎯 실측 패킷 명세(image_1aa12b.png)와 100% 일치하도록 data 내부의 paramList만 이중 직렬화합니다.
-  const bodyObj = {
-    data: {
-      type: "json",
-      paramList: JSON.stringify([{ param: keyword.trim() }])
+  // 승강기 고유 번호(7자리 숫자) 판정 시 공공데이터 조회 후 주소 기점 주소 변환 우회 연동
+  if (/^\d{7}$/.test(trimmed)) {
+    try {
+      const res = await searchByElevatorNo(trimmed, 1, signal);
+      if (res && res.items && res.items.length > 0) {
+        const item = res.items[0];
+        const addr = item.address1 || item.address2 || '';
+        if (addr) {
+          const coords = await geocodeAddress(addr, signal);
+          if (coords) {
+            return [{
+              BULD_NM: item.buldNm || '건물명 미기재',
+              ADDRESS: addr,
+              X_CORDNT: coords[0],
+              Y_CORDNT: coords[1]
+            }];
+          }
+        }
+      }
+    } catch (e) {
+      console.error(e);
     }
-  };
+    return [];
+  }
 
-  const res = await fetch(baseUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/plain, */*'
-    },
-    body: JSON.stringify(bodyObj),
-    signal
+  // 일반 건물명 및 주소 텍스트 검색 시 오픈 WFS 파이프라인 우회 태우기
+  const params = new URLSearchParams({
+    SERVICE: 'WFS',
+    VERSION: '1.0.0',
+    REQUEST: 'GetFeature',
+    OUTPUTFORMAT: 'application/json',
+    TYPENAME: 'koelsadp:building_q',
+    CQL_FILTER: `BULD_NM ILIKE '%${trimmed}%' OR ADDRESS ILIKE '%${trimmed}%'`
   });
 
-  if (!res.ok) throw new Error(`Search API HTTP error! status: ${res.status}`);
+  const res = await fetch(`/api/proxy?${params.toString()}`, { signal });
+  if (!res.ok) throw new Error(`WFS Search error! status: ${res.status}`);
 
   const data = await res.json();
-  return data.rows || [];
+  const features = data.features || [];
+
+  return features.map((f: any) => ({
+    BULD_NM: f.properties.BULD_NM ? f.properties.BULD_NM.trim() : '건물명 미기재',
+    ADDRESS: f.properties.ADDRESS ? f.properties.ADDRESS.trim() : '주소 미기재',
+    X_CORDNT: f.geometry.coordinates[1], // Latitude
+    Y_CORDNT: f.geometry.coordinates[0]  // Longitude
+  }));
 }

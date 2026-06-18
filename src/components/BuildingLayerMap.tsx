@@ -57,6 +57,7 @@ export default function BuildingLayerMap({
   const cachedBoundsRef = useRef<{ xmin: number; ymin: number; xmax: number; ymax: number } | null>(null);
   const lastZoomLevelRef = useRef<number | null>(null);
 
+  // 검색 통합 제어용 상태소자 레지스터
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchResults, setSearchResults] = useState<SearchBuildingResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -66,7 +67,10 @@ export default function BuildingLayerMap({
   const pendingAutoOpenRef = useRef<{ buldNm: string; address: string } | null>(null);
   const [mapInitialized, setMapInitialized] = useState(false);
 
-  // 외부 함수 참조가 변경되어 마커 폭풍 리렌더링이 가동되는 현상을 원천 가드합니다.
+  // 수동 숫자 다이렉트 페이지 입력 점프용 로컬 소자 상태 명세
+  const [inputMode, setInputMode] = useState(false);
+  const [paginationInputValue, setPaginationInputValue] = useState('1');
+
   const propsRef = useRef({
     onBookmarkChange,
     onShowBookmarkPicker,
@@ -727,27 +731,42 @@ export default function BuildingLayerMap({
     return searchResults.slice(start, start + ITEMS_PER_SEARCH_PAGE);
   }, [searchResults, searchCurrentPage]);
 
+  // Pagination 번호 셔플 알고리즘 (순정 기조 이식)
   const getSearchPageNumbers = (): (number | string)[] => {
     const pages: (number | string)[] = [];
-    const delta = 1;
+    const delta = 2;
+    const range: (number | string)[] = [];
+
     for (let i = Math.max(1, searchCurrentPage - delta); i <= Math.min(searchTotalPages, searchCurrentPage + delta); i++) {
-      pages.push(i);
+      range.push(i);
     }
+
     if (searchCurrentPage > delta + 1) {
-      pages.unshift(1);
-      if (searchCurrentPage > delta + 2) pages.splice(1, 0, '...');
+      pages.push(1);
+      if (searchCurrentPage > delta + 2) pages.push('...');
     }
+    pages.push(...range);
     if (searchCurrentPage < searchTotalPages - delta) {
       if (searchCurrentPage < searchTotalPages - delta - 1) pages.push('...');
       pages.push(searchTotalPages);
     }
+
     return pages;
+  };
+
+  const handleInputModeSubmit = () => {
+    const page = Math.max(1, Math.min(searchTotalPages, parseInt(paginationInputValue, 10)));
+    if (!isNaN(page)) {
+      setSearchCurrentPage(page);
+      setPaginationInputValue(page.toString());
+      setInputMode(false);
+    }
   };
 
   return (
     <div ref={wrapperRef} className={`w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-2 shadow-sm flex flex-col gap-2 relative ${isFullscreen ? 'fixed inset-0 z-50 rounded-none p-0 border-0' : ''}`}>
       
-      {/* 🎯 순정 높이 540px를 완벽하게 유지하여 찌그러짐을 방어하는 지도 영역 */}
+      {/* 🎯 순정 540px 보존 고정 가드 영역 */}
       <div className="w-full relative shrink-0">
         <div ref={mapContainerRef} className="w-full rounded-xl bg-gray-50 dark:bg-gray-700 relative z-0" style={isFullscreen ? { width: '100%', height: '100%' } : { width: '100%', height: '540px' }} />
         
@@ -755,35 +774,35 @@ export default function BuildingLayerMap({
           <div className="absolute inset-0 bg-gray-900/5 backdrop-blur-[0.5px] z-10 flex items-center justify-center pointer-events-none">
             <div className="bg-white/95 dark:bg-gray-800/95 shadow-xl border border-slate-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 pointer-events-auto active:scale-95 transition-transform">
               🔍 지도를 조금 더 확대하면 승강기가 표시됩니다.
-            </div>
           </div>
+        </div>
         )}
 
-        <button
-          onClick={toggleFullscreen}
+      <button
+        onClick={toggleFullscreen}
           className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 left-4 focus:outline-none flex items-center justify-center"
-        >
-          {isFullscreen ? <Minimize size={16} className="text-gray-700 dark:text-gray-300" /> : <Maximize size={16} className="text-gray-700 dark:text-gray-300" />}
-        </button>
+      >
+        {isFullscreen ? <Minimize size={16} className="text-gray-700 dark:text-gray-300" /> : <Maximize size={16} className="text-gray-700 dark:text-gray-300" />}
+      </button>
 
-        {scanning && !zoomTooHigh && (
+      {scanning && !zoomTooHigh && (
           <div className="absolute top-4 left-[60px] z-20 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-1.5 shadow-sm">
-            <Loader2 size={12} className="animate-spin text-blue-500" />
+          <Loader2 size={12} className="animate-spin text-blue-500" />
             <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300">반경 승강기 스캔 중...</span>
-          </div>
-        )}
+        </div>
+      )}
 
-        <button
-          type="button"
-          onClick={handleMoveToCurrentLocation}
+      <button
+        type="button"
+        onClick={handleMoveToCurrentLocation}
           className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 active:scale-95 transition-all bottom-4 right-4 focus:outline-none flex items-center justify-center w-8 h-8"
-          title="현재 위치로 이동"
-        >
-          <Navigation size={15} className="text-blue-600 dark:text-blue-400 fill-current" />
-        </button>
-      </div>
+        title="현재 위치로 이동"
+      >
+        <Navigation size={15} className="text-blue-600 dark:text-blue-400 fill-current" />
+      </button>
+    </div>
 
-      {/* 🎯 지도 아래 독립 공간에 완벽하게 분리되어 안착된 통합 검색 섹션 */}
+      {/* 🎯 지도를 절대 가리지 않도록 하단 영역으로 안전하게 착륙한 통합 목차 검색 컴포넌트 */}
       <div className="w-full max-w-md mx-auto flex flex-col gap-1.5 p-1">
         <form onSubmit={handleBuildingSearch} className="w-full flex items-center bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 transition-all focus-within:ring-1 focus-within:ring-blue-500">
           <input
@@ -820,7 +839,7 @@ export default function BuildingLayerMap({
         </form>
 
         {showResultPanel && searchResults.length > 0 && (
-          <div className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-2 flex flex-col max-h-[220px]">
+          <div className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-2 flex flex-col max-h-[260px]">
             <div className="flex justify-between items-center px-1 pb-1 mb-1 border-b border-gray-100 dark:border-gray-800 text-[10px] text-gray-400 font-bold">
               <span>검색 결과 총 {searchResults.length}건</span>
               <button type="button" onClick={() => setShowResultPanel(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X size={11} strokeWidth={2.5} /></button>
@@ -847,53 +866,79 @@ export default function BuildingLayerMap({
               ))}
             </div>
 
+            {/* 🎯 [순정 기조형 수동 숫자 입력 포함 목차 바 컴포넌트 실체 각인] */}
             {searchTotalPages > 1 && (
-              <div className="flex items-center justify-center gap-1 pt-1.5 mt-1 border-t border-gray-100 dark:border-gray-800 shrink-0">
+              <div className="flex items-center justify-center gap-1 py-1 mt-2 border-t border-gray-100 dark:border-gray-800">
                 <button
                   type="button"
-                  disabled={searchCurrentPage === 1}
                   onClick={() => setSearchCurrentPage(1)}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-[9px] font-bold text-gray-600 dark:text-gray-400"
+                  disabled={searchCurrentPage === 1}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  title="첫 페이지"
                 >
                   {'<<'}
                 </button>
                 <button
                   type="button"
+                  onClick={() => setSearchCurrentPage(p => Math.max(1, p - 1))}
                   disabled={searchCurrentPage === 1}
-                  onClick={() => setSearchCurrentPage(prev => prev - 1)}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-gray-600 dark:text-gray-400"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
-                  <ChevronLeft size={10} strokeWidth={2.5} />
+                  <ChevronLeft size={11} />
                 </button>
                 <div className="flex items-center gap-0.5">
-                  {getSearchPageNumbers().map((p, pIdx) =>
-                    p === '...' ? (
-                      <span key={`search-dots-${pIdx}`} className="text-[10px] px-0.5 text-gray-400">...</span>
+                  {getSearchPageNumbers().map((page, idx) =>
+                    page === '...' ? (
+                      <span key={`search-dots-${idx}`} className="w-7 h-7 flex items-center justify-center text-gray-400 text-xs">...</span>
+                    ) : inputMode && page === searchCurrentPage ? (
+                      <div key={`search-input-${page}`} className="w-7 h-7 flex items-center justify-center rounded-lg border border-blue-600 bg-blue-600 text-white">
+                        <input
+                          autoFocus
+                          type="number"
+                          min="1"
+                          max={searchTotalPages}
+                          value={paginationInputValue}
+                          onChange={(e) => setPaginationInputValue(e.target.value)}
+                          onBlur={handleInputModeSubmit}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleInputModeSubmit();
+                          }}
+                          className="w-10 h-5 text-center text-xs text-black dark:text-white bg-white dark:bg-gray-800 border border-blue-400 rounded focus:outline-none"
+                        />
+                      </div>
                     ) : (
                       <button
-                        key={`search-page-${p}`}
+                        key={`search-btn-${page}`}
                         type="button"
-                        onClick={() => setSearchCurrentPage(p as number)}
-                        className={`w-5 h-5 text-[10px] font-bold rounded border ${p === searchCurrentPage ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900'}`}
+                        onClick={() => {
+                          if (page === searchCurrentPage) {
+                            setPaginationInputValue(page.toString());
+                            setInputMode(true);
+                          } else {
+                            setSearchCurrentPage(page as number);
+                          }
+                        }}
+                        className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-semibold border transition-colors ${page === searchCurrentPage ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                       >
-                        {p}
+                        {page}
                       </button>
                     )
                   )}
                 </div>
                 <button
                   type="button"
+                  onClick={() => setSearchCurrentPage(p => Math.min(searchTotalPages, p + 1))}
                   disabled={searchCurrentPage === searchTotalPages}
-                  onClick={() => setSearchCurrentPage(prev => prev + 1)}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-gray-600 dark:text-gray-400"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
-                  <ChevronRight size={10} strokeWidth={2.5} />
+                  <ChevronRight size={11} />
                 </button>
                 <button
                   type="button"
-                  disabled={searchCurrentPage === searchTotalPages}
                   onClick={() => setSearchCurrentPage(searchTotalPages)}
-                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-[9px] font-bold text-gray-600 dark:text-gray-400"
+                  disabled={searchCurrentPage === searchTotalPages}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  title="마지막 페이지"
                 >
                   {'>>'}
                 </button>
