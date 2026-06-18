@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { ensureKakaoReady, fetchEleBuildings, EleBuildingFeature } from '../utils/api';
+import { ensureKakaoReady, fetchEleBuildings, EleBuildingFeature, searchEleBuildings, SearchBuildingResult } from '../utils/api';
 import { searchByAddress } from '../utils/api';
 import { sortElevators, assignBadges, formatRatedSpeed, formatElevatorNo, checkShuttleSection, formatDate } from '../utils/elevatorHelpers';
-import { Maximize, Minimize, Loader2, Navigation } from 'lucide-react';
+import { Maximize, Minimize, Loader2, Navigation, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ElevatorWithBadges, SettingsFields } from '../types';
 import { removeBookmark } from '../utils/bookmarks';
 
@@ -56,6 +56,32 @@ export default function BuildingLayerMap({
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cachedBoundsRef = useRef<{ xmin: number; ymin: number; xmax: number; ymax: number } | null>(null);
   const lastZoomLevelRef = useRef<number | null>(null);
+
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchBuildingResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showResultPanel, setShowResultPanel] = useState(false);
+  const [searchCurrentPage, setSearchCurrentPage] = useState(1);
+  const searchAbortControllerRef = useRef<AbortController | null>(null);
+  const pendingAutoOpenRef = useRef<{ buldNm: string; address: string } | null>(null);
+  const [mapInitialized, setMapInitialized] = useState(false);
+
+  // 외부 함수 참조가 변경되어 마커 폭풍 리렌더링이 가동되는 현상을 원천 가드합니다.
+  const propsRef = useRef({
+    onBookmarkChange,
+    onShowBookmarkPicker,
+    onBuildingSelect,
+    onLoadingStateChange,
+  });
+
+  useEffect(() => {
+    propsRef.current = {
+      onBookmarkChange,
+      onShowBookmarkPicker,
+      onBuildingSelect,
+      onLoadingStateChange,
+    };
+  });
 
   useEffect(() => {
     const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -153,6 +179,8 @@ export default function BuildingLayerMap({
       coordinateGroups[coordKey].push(feat);
     });
 
+    let autoClickTargetElement: HTMLElement | null = null;
+
     Object.values(coordinateGroups).forEach((groupFeatures) => {
       const isShared = groupFeatures.length > 1;
 
@@ -215,9 +243,9 @@ export default function BuildingLayerMap({
         });
 
         markerElement.onclick = async (e) => {
-          e.stopPropagation();
+          if (e) e.stopPropagation();
           closeAllPreviews();
-          onLoadingStateChange(true);
+          propsRef.current.onLoadingStateChange(true);
 
           const addrRaw = feat.properties.ADDRESS || '';
           const addrParts = addrRaw.split(/\s+/).filter(Boolean);
@@ -441,11 +469,11 @@ export default function BuildingLayerMap({
                       if (isBookmarked) {
                         await removeBookmark(elvNo);
                         window.dispatchEvent(new Event('bookmarksUpdated'));
-                        if (onBookmarkChange) onBookmarkChange();
+                        if (propsRef.current.onBookmarkChange) propsRef.current.onBookmarkChange();
                       } else {
                         const found = enhanced.find(item => item.elevatorNo === elvNo);
-                        if (found && onShowBookmarkPicker) {
-                          onShowBookmarkPicker(found);
+                        if (found && propsRef.current.onShowBookmarkPicker) {
+                          propsRef.current.onShowBookmarkPicker(found);
                         }
                       }
                     }
@@ -457,7 +485,7 @@ export default function BuildingLayerMap({
                     const elvNo = rowClickable.getAttribute('data-id');
                     const found = enhanced.find(item => item.elevatorNo === elvNo);
                     if (found) {
-                      onBuildingSelect([found], true);
+                      propsRef.current.onBuildingSelect([found], true);
                     }
                   }
                 });
@@ -469,15 +497,28 @@ export default function BuildingLayerMap({
           } catch (err) {
             console.error(err);
           } finally {
-            onLoadingStateChange(false);
+            propsRef.current.onLoadingStateChange(false);
           }
         };
+
+        if (pendingAutoOpenRef.current && 
+            pendingAutoOpenRef.current.buldNm === buildingNameRaw && 
+            pendingAutoOpenRef.current.address.slice(0, 15) === buildingAddressRaw.slice(0, 15)) {
+          autoClickTargetElement = markerElement;
+        }
 
         customMarkerOverlay.setMap(map);
         customMarkersRef.current.push(customMarkerOverlay);
       });
     });
-  }, [bookmarkedMgtKeys, viewedMgtKeys, bookmarkedTextKeys, viewedTextKeys, bookmarkedIds, viewedIds, onBookmarkChange, onShowBookmarkPicker, onBuildingSelect, onLoadingStateChange, settings]);
+
+    if (autoClickTargetElement) {
+      pendingAutoOpenRef.current = null;
+      setTimeout(() => {
+        if (autoClickTargetElement) autoClickTargetElement.click();
+      }, 80);
+    }
+  }, [bookmarkedMgtKeys, viewedMgtKeys, bookmarkedTextKeys, viewedTextKeys, bookmarkedIds, viewedIds, settings]);
 
   useEffect(() => {
     if (mapInstanceRef.current && fetchedFeaturesRef.current.length > 0) {
@@ -537,6 +578,8 @@ export default function BuildingLayerMap({
   };
 
   useEffect(() => {
+    if (!visible || mapInstanceRef.current || mapInitialized) return;
+
     async function initMap() {
       await ensureKakaoReady();
       if (!mapContainerRef.current || mapInstanceRef.current) return;
@@ -558,6 +601,7 @@ export default function BuildingLayerMap({
       map.addControl(new kakao.maps.MapTypeControl(), kakao.maps.ControlPosition.TOPRIGHT);
       map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
       mapInstanceRef.current = map;
+      setMapInitialized(true);
 
       kakao.maps.event.addListener(map, 'idle', () => {
         abortControllerRef.current?.abort();
@@ -647,42 +691,218 @@ export default function BuildingLayerMap({
     }
 
     initMap();
-  }, [renderBuildingMarkers]);
+  }, [visible, mapInitialized, renderBuildingMarkers]);
+
+  const handleBuildingSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchKeyword.trim()) {
+      setSearchResults([]);
+      setShowResultPanel(false);
+      return;
+    }
+
+    searchAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortControllerRef.current = controller;
+
+    setSearchLoading(true);
+    setSearchCurrentPage(1);
+
+    try {
+      const data = await searchEleBuildings(searchKeyword.trim(), controller.signal);
+      setSearchResults(data);
+      setShowResultPanel(true);
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
+      console.error(err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const ITEMS_PER_SEARCH_PAGE = 10;
+  const searchTotalPages = Math.ceil(searchResults.length / ITEMS_PER_SEARCH_PAGE);
+  const paginatedSearchResults = useMemo(() => {
+    const start = (searchCurrentPage - 1) * ITEMS_PER_SEARCH_PAGE;
+    return searchResults.slice(start, start + ITEMS_PER_SEARCH_PAGE);
+  }, [searchResults, searchCurrentPage]);
+
+  const getSearchPageNumbers = (): (number | string)[] => {
+    const pages: (number | string)[] = [];
+    const delta = 1;
+    for (let i = Math.max(1, searchCurrentPage - delta); i <= Math.min(searchTotalPages, searchCurrentPage + delta); i++) {
+      pages.push(i);
+    }
+    if (searchCurrentPage > delta + 1) {
+      pages.unshift(1);
+      if (searchCurrentPage > delta + 2) pages.splice(1, 0, '...');
+    }
+    if (searchCurrentPage < searchTotalPages - delta) {
+      if (searchCurrentPage < searchTotalPages - delta - 1) pages.push('...');
+      pages.push(searchTotalPages);
+    }
+    return pages;
+  };
 
   return (
-    <div ref={wrapperRef} className={`w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-2 shadow-sm relative ${isFullscreen ? 'fixed inset-0 z-50 rounded-none p-0 border-0 flex flex-col' : ''}`}>
-      <div ref={mapContainerRef} className={`w-full rounded-xl bg-gray-50 dark:bg-gray-700 relative z-0 ${isFullscreen ? 'flex-1 rounded-none' : ''}`} style={isFullscreen ? { width: '100%', height: '100%' } : { width: '100%', height: '540px' }} />
+    <div ref={wrapperRef} className={`w-full bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-2 shadow-sm flex flex-col gap-2 relative ${isFullscreen ? 'fixed inset-0 z-50 rounded-none p-0 border-0' : ''}`}>
       
-      {zoomTooHigh && (
-        <div className="absolute inset-0 bg-gray-900/5 backdrop-blur-[0.5px] z-10 flex items-center justify-center pointer-events-none">
-          <div className="bg-white/95 dark:bg-gray-800/95 shadow-xl border border-slate-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 pointer-events-auto active:scale-95 transition-transform">
-            🔍 지도를 조금 더 확대하면 승강기가 표시됩니다.
+      {/* 🎯 순정 높이 540px를 완벽하게 유지하여 찌그러짐을 방어하는 지도 영역 */}
+      <div className="w-full relative shrink-0">
+        <div ref={mapContainerRef} className="w-full rounded-xl bg-gray-50 dark:bg-gray-700 relative z-0" style={isFullscreen ? { width: '100%', height: '100%' } : { width: '100%', height: '540px' }} />
+        
+        {zoomTooHigh && (
+          <div className="absolute inset-0 bg-gray-900/5 backdrop-blur-[0.5px] z-10 flex items-center justify-center pointer-events-none">
+            <div className="bg-white/95 dark:bg-gray-800/95 shadow-xl border border-slate-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 pointer-events-auto active:scale-95 transition-transform">
+              🔍 지도를 조금 더 확대하면 승강기가 표시됩니다.
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <button
-        onClick={toggleFullscreen}
-        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 left-4 focus:outline-none flex items-center justify-center"
-      >
-        {isFullscreen ? <Minimize size={16} className="text-gray-700 dark:text-gray-300" /> : <Maximize size={16} className="text-gray-700 dark:text-gray-300" />}
-      </button>
+        <button
+          onClick={toggleFullscreen}
+          className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors top-4 left-4 focus:outline-none flex items-center justify-center"
+        >
+          {isFullscreen ? <Minimize size={16} className="text-gray-700 dark:text-gray-300" /> : <Maximize size={16} className="text-gray-700 dark:text-gray-300" />}
+        </button>
 
-      {scanning && !zoomTooHigh && (
-        <div className="absolute top-4 left-[60px] z-20 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-1.5 shadow-sm">
-          <Loader2 size={12} className="animate-spin text-blue-500" />
-          <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300">반경 승강기 스캔 중...</span>
-        </div>
-      )}
+        {scanning && !zoomTooHigh && (
+          <div className="absolute top-4 left-[60px] z-20 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-1.5 shadow-sm">
+            <Loader2 size={12} className="animate-spin text-blue-500" />
+            <span className="text-[10px] font-bold text-gray-700 dark:text-gray-300">반경 승강기 스캔 중...</span>
+          </div>
+        )}
 
-      <button
-        type="button"
-        onClick={handleMoveToCurrentLocation}
-        className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 active:scale-95 transition-all bottom-4 right-4 focus:outline-none flex items-center justify-center w-8 h-8"
-        title="현재 위치로 이동"
-      >
-        <Navigation size={15} className="text-blue-600 dark:text-blue-400 fill-current" />
-      </button>
+        <button
+          type="button"
+          onClick={handleMoveToCurrentLocation}
+          className="absolute z-20 bg-white dark:bg-gray-700 rounded-lg shadow-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 active:scale-95 transition-all bottom-4 right-4 focus:outline-none flex items-center justify-center w-8 h-8"
+          title="현재 위치로 이동"
+        >
+          <Navigation size={15} className="text-blue-600 dark:text-blue-400 fill-current" />
+        </button>
+      </div>
+
+      {/* 🎯 지도 아래 독립 공간에 완벽하게 분리되어 안착된 통합 검색 섹션 */}
+      <div className="w-full max-w-md mx-auto flex flex-col gap-1.5 p-1">
+        <form onSubmit={handleBuildingSearch} className="w-full flex items-center bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 transition-all focus-within:ring-1 focus-within:ring-blue-500">
+          <input
+            type="text"
+            value={searchKeyword}
+            onChange={(e) => {
+              setSearchKeyword(e.target.value);
+              if (!e.target.value.trim()) {
+                setSearchResults([]);
+                setShowResultPanel(false);
+              }
+            }}
+            placeholder="건물명, 주소, 승강기번호 통합검색"
+            className="w-full text-xs bg-transparent border-none outline-none focus:outline-none dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 h-6 font-medium"
+          />
+          <div className="flex items-center gap-1 shrink-0 ml-1">
+            {searchKeyword && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchKeyword('');
+                  setSearchResults([]);
+                  setShowResultPanel(false);
+                }}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+              >
+                <X size={13} strokeWidth={2.5} />
+              </button>
+            )}
+            <button type="submit" disabled={searchLoading} className="p-1 text-blue-600 dark:text-blue-400 hover:scale-105 active:scale-95 transition-all focus:outline-none">
+              {searchLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} strokeWidth={2.5} />}
+            </button>
+          </div>
+        </form>
+
+        {showResultPanel && searchResults.length > 0 && (
+          <div className="w-full bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-2 flex flex-col max-h-[220px]">
+            <div className="flex justify-between items-center px-1 pb-1 mb-1 border-b border-gray-100 dark:border-gray-800 text-[10px] text-gray-400 font-bold">
+              <span>검색 결과 총 {searchResults.length}건</span>
+              <button type="button" onClick={() => setShowResultPanel(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X size={11} strokeWidth={2.5} /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto space-y-1 pr-0.5" style={{ scrollbarWidth: 'thin' }}>
+              {paginatedSearchResults.map((row, idx) => (
+                <div
+                  key={`${row.BULD_NM}-${idx}`}
+                  onClick={() => {
+                    if (mapInstanceRef.current) {
+                      const movePos = new (window as any).kakao.maps.LatLng(row.X_CORDNT, row.Y_CORDNT);
+                      pendingAutoOpenRef.current = { buldNm: row.BULD_NM, address: row.ADDRESS };
+                      mapInstanceRef.current.setLevel(2);
+                      mapInstanceRef.current.panTo(movePos);
+                      setShowResultPanel(false);
+                    }
+                  }}
+                  className="w-full text-left p-2 rounded-lg border border-transparent hover:border-blue-100 dark:hover:border-blue-900/40 bg-gray-50/50 dark:bg-gray-800/40 hover:bg-blue-50/20 dark:hover:bg-blue-950/10 cursor-pointer transition-all flex flex-col gap-0.5"
+                >
+                  <span className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{row.BULD_NM}</span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{row.ADDRESS}</span>
+                </div>
+              ))}
+            </div>
+
+            {searchTotalPages > 1 && (
+              <div className="flex items-center justify-center gap-1 pt-1.5 mt-1 border-t border-gray-100 dark:border-gray-800 shrink-0">
+                <button
+                  type="button"
+                  disabled={searchCurrentPage === 1}
+                  onClick={() => setSearchCurrentPage(1)}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-[9px] font-bold text-gray-600 dark:text-gray-400"
+                >
+                  {'<<'}
+                </button>
+                <button
+                  type="button"
+                  disabled={searchCurrentPage === 1}
+                  onClick={() => setSearchCurrentPage(prev => prev - 1)}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-gray-600 dark:text-gray-400"
+                >
+                  <ChevronLeft size={10} strokeWidth={2.5} />
+                </button>
+                <div className="flex items-center gap-0.5">
+                  {getSearchPageNumbers().map((p, pIdx) =>
+                    p === '...' ? (
+                      <span key={`search-dots-${pIdx}`} className="text-[10px] px-0.5 text-gray-400">...</span>
+                    ) : (
+                      <button
+                        key={`search-page-${p}`}
+                        type="button"
+                        onClick={() => setSearchCurrentPage(p as number)}
+                        className={`w-5 h-5 text-[10px] font-bold rounded border ${p === searchCurrentPage ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900'}`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={searchCurrentPage === searchTotalPages}
+                  onClick={() => setSearchCurrentPage(prev => prev + 1)}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-gray-600 dark:text-gray-400"
+                >
+                  <ChevronRight size={10} strokeWidth={2.5} />
+                </button>
+                <button
+                  type="button"
+                  disabled={searchCurrentPage === searchTotalPages}
+                  onClick={() => setSearchCurrentPage(searchTotalPages)}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 disabled:opacity-40 text-[9px] font-bold text-gray-600 dark:text-gray-400"
+                >
+                  {'>>'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
