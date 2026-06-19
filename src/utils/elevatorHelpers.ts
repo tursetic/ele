@@ -1,4 +1,4 @@
-import { Elevator, ElevatorWithBadges, FilterOptions } from '../types';
+import type { Elevator, ElevatorWithBadges, FilterOptions } from '../types';
 
 export function formatElevatorNo(no?: string | null): string {
   if (!no) return '';

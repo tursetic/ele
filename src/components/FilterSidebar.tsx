@@ -289,8 +289,10 @@ export default function FilterSidebar({
     );
   };
 
+  // src/components/FilterSidebar.tsx 파일 맨 하단의 return (...) 시작 구역을 찾아 교체합니다.
+
   return (
-    <div className="fixed inset-0 z-50 flex" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[250] flex" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-xs" onClick={onClose} />
       <div className="relative ml-auto bg-white dark:bg-gray-800 w-76 max-w-[85vw] h-screen flex flex-col shadow-2xl font-sans">
         

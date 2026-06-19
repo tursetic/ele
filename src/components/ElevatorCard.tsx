@@ -43,14 +43,11 @@ export default function ElevatorCard({
 
   const isMulti = elevators.length > 1;
 
-  // 🎯 [완치 1] 승강기 번호 배지 디자인을 호기 배지와 동일한 스타일(배경/테두리/크기)로 일원화하고 font-medium 유지
   const standardizedBadgeClass = 'bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-bold border border-slate-200/40 dark:border-gray-600/40 text-[9.5px] shrink-0';
 
-  // 🎯 요청사항 반영: 최고층/최저층 배지에서 볼드(font-bold) 제거 후 font-normal 일원화
   const topGroundBadgeHtml = <span className="bg-amber-50/40 dark:bg-amber-950/10 text-amber-600/90 dark:text-amber-500/80 border border-amber-200/30 text-[8.5px] font-normal rounded px-1 shrink-0">최고층</span>;
   const deepUndergroundBadgeHtml = <span className="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-normal rounded px-1 shrink-0">최저층</span>;
 
-  // 1) 단독 카드 레이아웃 브랜치 (elevators.length === 1)
   if (!isMulti) {
     const el = elevators[0];
     const isBookmarked = bookmarkedIds.has(el.elevatorNo);
@@ -84,7 +81,6 @@ export default function ElevatorCard({
         onClick={() => onSelect(el)}
         className={`border rounded-xl px-2.5 py-2 ${rowBgClass} hover:shadow-md transition-all cursor-pointer flex flex-col gap-0 relative group`}
       >
-        {/* 상단 라인: 건물명 및 주소 */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1 flex flex-col gap-0">
             <div className="flex items-baseline gap-1.5 flex-wrap">
@@ -103,7 +99,6 @@ export default function ElevatorCard({
           </div>
         </div>
 
-        {/* 호기 / 승강기 번호 배지 라인 */}
         <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-gray-700/40 flex items-center gap-1.5 flex-wrap">
           <span className="px-1.5 py-0.25 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 text-[9.5px] font-bold rounded border border-slate-200/40 dark:border-gray-600/40 shrink-0">
             {displayAsignWithPlace}
@@ -113,7 +108,6 @@ export default function ElevatorCard({
           </span>
         </div>
 
-        {/* 제원 제어 영역 */}
         <div className="mt-1 flex flex-col gap-0">
           <div className="flex items-baseline gap-1.5 flex-wrap text-[14.5px]">
             <span className="text-slate-900 dark:text-gray-100 font-black tracking-tight shrink-0">{el.manufacturerName || '제조사 미기재'}</span>
@@ -128,7 +122,6 @@ export default function ElevatorCard({
           </div>
         </div>
 
-        {/* 🎯 하단 마감구역: ElevatorModal의 '교체/최초설치 분리 2줄' 레이아웃 및 'font-bold 승강기 종류 배지 스타일' 이식 완료 */}
         <div className="flex items-center justify-between gap-2 pt-1 mt-1 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
           <div className="flex items-center gap-1.5">
             <div className="flex flex-col gap-0 leading-none">
@@ -155,22 +148,17 @@ export default function ElevatorCard({
     );
   }
 
-  // 2) 복합 카드 레이아웃 브랜치 (elevators.length > 1)
   const isGroupBookmarked = elevators.some(e => bookmarkedIds.has(e.elevatorNo));
   const isGroupViewed = elevators.some(e => viewedIds.has(e.elevatorNo));
 
   const maxGroundFloor = Math.max(...elevators.map(e => parseInt(e.divGroundFloorCnt, 10) || 0));
   const maxUndergroundFloor = Math.max(...elevators.map(e => parseInt(e.divUndgrndFloorCnt, 10) || 0));
 
-  const groupHeaderBg = isGroupBookmarked
-    ? 'bg-yellow-500/10 dark:bg-yellow-900/20 border-yellow-500/20 shadow-xs'
-    : isGroupViewed
-    ? 'bg-slate-100 dark:bg-gray-800 border-l-4 border-l-slate-400 dark:border-l-gray-500 opacity-70 backdrop-blur-xs shadow-xs'
-    : 'bg-slate-100 dark:bg-gray-800';
+  const groupHeaderBg = isGroupBookmarked ? 'bg-yellow-500/10 dark:bg-yellow-900/20 border-yellow-500/20 shadow-xs'
+    : isGroupViewed ? 'bg-slate-100 dark:bg-gray-800 border-l-4 border-l-slate-400 dark:border-l-gray-500 opacity-70 backdrop-blur-xs shadow-xs' : 'bg-slate-100 dark:bg-gray-800';
 
   return (
     <div className="border border-slate-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex flex-col bg-white dark:bg-gray-900">
-      {/* 복합 카드 상단 헤더 구역 */}
       <div className={`px-2.5 py-1.5 border-b border-slate-200 dark:border-gray-700 flex items-start justify-between gap-2 ${groupHeaderBg}`}>
         <div className="min-w-0 flex-1 flex flex-col gap-0">
           <div className="flex items-baseline gap-1.5 flex-wrap">
@@ -191,7 +179,6 @@ export default function ElevatorCard({
         </div>
       </div>
 
-      {/* 내부 소속 승강기 로우 리스트 구역 */}
       <div className="bg-white dark:bg-gray-900 p-0.5 space-y-0.5">
         {elevators.map((el, idx) => {
           const isBookmarked = bookmarkedIds.has(el.elevatorNo);
@@ -211,12 +198,8 @@ export default function ElevatorCard({
             ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
             : 'bg-slate-50 dark:bg-gray-800/50 text-slate-600 dark:text-gray-400 border-slate-200 dark:border-gray-700/40 font-normal text-[9.5px]';
 
-          // 🎯 [디자인 빌드업] MapView의 굵은 황색 보더를 이식하고, 일반 상태에 투명 가드를 세워 레이아웃 스냅 현상을 방어합니다.
-          const itemBgClass = isBookmarked
-            ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500 shadow-xs'
-            : isViewed
-            ? 'bg-white dark:bg-gray-800 border-l-4 border-l-slate-300 dark:border-l-gray-600 opacity-70'
-            : 'bg-white dark:bg-gray-900 border-l-4 border-l-transparent';
+          const itemBgClass = isBookmarked ? 'bg-yellow-100/20 dark:bg-yellow-800/10 border-l-4 border-l-yellow-500 shadow-xs'
+            : isViewed ? 'bg-white dark:bg-gray-800 border-l-4 border-l-slate-300 dark:border-l-gray-600 opacity-70' : 'bg-white dark:bg-gray-900 border-l-4 border-l-transparent';
 
           return (
             <div
@@ -250,7 +233,6 @@ export default function ElevatorCard({
                 <span className="bg-slate-50 dark:bg-gray-800/60 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium">{el.liveLoad ? `${String(el.liveLoad).replace(/kg/gi, '').trim()} kg` : '-'}</span>
               </div>
 
-              {/* 🎯 복합 목록 내부 마감구역: ElevatorModal의 '교체/최초설치 분리 2줄' 및 'font-bold 승강기 종류 배지 스타일' 완벽 동기화 이식 */}
               <div className="flex items-center justify-between gap-2 pt-0.5 mt-0.5 border-t border-slate-100 dark:border-gray-700/40 text-[11px]">
                 <div className="flex items-center gap-1.5">
                   <div className="flex flex-col gap-0 leading-none">

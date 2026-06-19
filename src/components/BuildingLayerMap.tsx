@@ -67,18 +67,44 @@ export default function BuildingLayerMap({
     };
   }, []);
 
+  // 🎯 수정 전: visible만 감시하던 useEffect 구역을 찾아 아래 코드로 교체합니다.
   useEffect(() => {
-    if (visible && mapInstanceRef.current) {
+    if (mapInstanceRef.current) {
+      // 1. 지도의 크기 재배정 엔진 가동
       mapInstanceRef.current.relayout();
+      
+      // 2. 전체화면 전환 시 맵 중심점이 마커 밖으로 이탈하지 않도록 현재 중심 좌표 재고정
+      const currentCenter = mapInstanceRef.current.getCenter();
+      mapInstanceRef.current.setCenter(currentCenter);
     }
-  }, [visible]);
+  }, [visible, isFullscreen]); // isFullscreen 상태 변화 감지 추가
 
+  // 🎯 기존 toggleFullscreen 함수 블록을 완전히 지우고 아래 코드로 교체합니다.
   const toggleFullscreen = () => {
     if (!wrapperRef.current) return;
-    if (!document.fullscreenElement) {
-      wrapperRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+  
+    // 1. 이미 전체화면 상태라면 안전하게 해제 프로세스 진행
+    if (document.fullscreenElement || isFullscreen) {
+      if (document.exitFullscreen && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsFullscreen(false);
+      return;
+    }
+  
+    // 2. 전체화면 진입 시도 (모바일/iOS 샌드박스 가드 탑재)
+    if (wrapperRef.current.requestFullscreen) {
+      wrapperRef.current.requestFullscreen()
+        .then(() => {
+          setIsFullscreen(true);
+        })
+        .catch(() => {
+          // 🎯 [모바일 핵심 가드] 네이티브 전체화면이 거절당하면 즉시 CSS 페이크 전체화면 모드로 우회 구동합니다.
+          setIsFullscreen(true);
+        });
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      // requestFullscreen 명세 자체가 아예 존재하지 않는 iOS/아이폰 브라우저 대응
+      setIsFullscreen(true);
     }
   };
 
