@@ -93,6 +93,18 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
     if (!map || !customMarkersRef.current || customMarkersRef.current.length === 0) return;
 
     const bounds = map.getBounds();
+    if (!bounds) return;
+
+    // 🎯 [영역 오독 방어막 가드] 지도가 hidden에서 복귀 시 bounds 좌표계가 정착하지 못해 너비가 0인 순간, 마커를 전부 지워버리는 결함을 차단
+    const sw = bounds.getSouthWest();
+    const ne = bounds.getNorthEast();
+    if (sw.getLat() === ne.getLat() && sw.getLng() === ne.getLng()) {
+      customMarkersRef.current.forEach((markerOverlay) => {
+        if (markerOverlay) markerOverlay.setMap(map);
+      });
+      return;
+    }
+
     let insideBoundsCount = 0;
     const MAX_VISIBLE_MARKERS = 300;
 
@@ -127,16 +139,31 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
     }
   }, []);
 
+  // 🎯 [생명주기 가드 교정] 동일 탭 내 목록 ↔ 지도 토글 시에는 setBounds 강제 호출을 스킵하여 축척(Level)과 중심점 포커스를 원본 그대로 락다운
   useEffect(() => {
     if (visible && mapInstanceRef.current) {
       setTimeout(() => {
+        if (!mapInstanceRef.current) return;
         mapInstanceRef.current.relayout();
-        if (openedOverlayRef.current) {
-          setTimeout(() => reopenOverlay(), 100);
+        
+        // 1. 보존되어 있던 기존 마커 배열 관계 지도 인스턴스에 재바인딩
+        if (customMarkersRef.current && customMarkersRef.current.length > 0) {
+          customMarkersRef.current.forEach((markerOverlay) => {
+            if (markerOverlay) markerOverlay.setMap(mapInstanceRef.current);
+          });
         }
+
+        // 2. [축척 고정 완치] 목록 전환 시에는 전체 경계선 재생성(setBounds)을 철저히 우회하여 유저가 만져둔 원래 레벨/포커스 그대로 킵
+        setTimeout(() => {
+          updateMarkerVisibility();
+          if (openedOverlayRef.current) {
+            reopenOverlay();
+          }
+        }, 100);
+
       }, 50);
     }
-  }, [visible, reopenOverlay]);
+  }, [visible, reopenOverlay, updateMarkerVisibility]);
 
   const focusAddressRef = useRef<string>('');
   const pendingFocusRef = useRef<string | null>(null);
@@ -289,6 +316,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
           });
         }
 
+        // 🎯 최초 검색(데이터 완전 변경 시점)에만 정직하게 카메라 바운드를 잡아줌
         if (isNewMap && !restoreMode) {
           setTimeout(() => {
             if (mapInstanceRef.current && isCurrent) {
@@ -390,14 +418,12 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
               overlayContent.addEventListener(evt, blockMapInteractions, { passive: true });
             });
 
-            // 🎯 [완치] group.address(address1)에 갇혀있던 설계 한계를 깨고, 원본 데이터의 address2까지 유실 없이 결합합니다.
             const primaryEv = elevatorsList[0];
             const fullAddr = primaryEv 
               ? `${primaryEv.address1 || ''}${primaryEv.address2 ? ` ${primaryEv.address2}` : ''}` 
               : group.address || '';
             const cleanAddress = fullAddr.replace(/·/g, ' ').replace(/\s+/g, ' ').trim();
 
-            // 🎯 [완치 통합 가두리] ElevatorCard v25 이식 및 번호 배지 동기화 마감
             const rowsHtml = bldgEntries.map(([bName, evs]) => {
               const buildingSectionHeader = isMultiBuilding ? `
                 <div class="flex items-center gap-1.5 px-0.5 py-0 sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -442,7 +468,7 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
                 if (manu.includes('현대엘')) modelColorClass = 'text-emerald-600 dark:text-emerald-400';
                 else if (manu.includes('오티스엘')) modelColorClass = 'text-indigo-600 dark:text-indigo-400';
                 else if (manu.includes('티케이엘')) modelColorClass = 'text-sky-500 dark:text-sky-400';
-                else if (manu.includes('미쓰비시') || primaryManu.includes('후지테크')) modelColorClass = 'text-red-500 dark:text-red-400';
+                else if (manu.includes('미쓰비시') || manu.includes('후지테크')) modelColorClass = 'text-red-500 dark:text-red-400';
 
                 const shuttleBadgeClass = !shuttle.valid
                   ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-950/40 dark:text-purple-400 dark:border-purple-800/50 font-bold text-[9.5px]'
@@ -452,15 +478,12 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
                   ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800/50' 
                   : 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800/50';
 
-                // 🎯 [완치 1] 호기 배지 레이아웃 테두리팩 형태로 번호 배지 디자인 일원화 (font-medium 지정)
                 const standardizedBadgeClass = 'bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded font-medium border border-slate-200/40 dark:border-gray-600/40 text-[9.5px] shrink-0';
 
-                // 🎯 [완치 2] 최고층/최저층 배지에 whitespace-nowrap을 주입하여 가로 폭 개행 현상을 원천 방어합니다.
                 const topGroundHtml = isTopGround ? `<span class="bg-amber-50/40 dark:bg-amber-950/10 text-amber-600/90 dark:text-amber-500/80 border border-amber-200/30 text-[8.5px] font-normal rounded px-1 shrink-0 whitespace-nowrap">최고층</span>` : '';
                 const deepUndergroundHtml = isDeepUnderground ? `<span class="bg-slate-100 dark:bg-gray-800 text-slate-500 text-[8.5px] font-normal rounded px-1 shrink-0 whitespace-nowrap">최저층</span>` : '';
                 const specialSectionHtml = (!shuttle.valid && ev.shuttleSection) ? `<span class="bg-purple-50/60 dark:bg-purple-950/10 text-purple-500 dark:text-purple-400 border border-purple-100/60 text-[8.5px] font-bold rounded px-1 py-0 shrink-0">특이</span>` : '';
 
-                // 🎯 [완치 3] 최초설치일 분리형 2줄 레이아웃 연산 가드 적용
                 const hasReplacement = ev.frstInstallationDe && ev.installationDe && ev.frstInstallationDe !== ev.installationDe;
                 let dateDisplayHtml = '';
                 if (hasReplacement) {
@@ -478,7 +501,6 @@ const MapView = forwardRef<MapViewRef, MapViewProps>(({
                   `;
                 }
 
-                // 🎯 [완치 4] 승강기 종류 배지 스타일 통일화 (font-bold)
                 const kindBadgeHtml = (!settings || settings.elvtrKindNm) && ev.elvtrKindNm
                   ? `<span class="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 px-1.5 py-0.25 rounded border border-slate-200/40 dark:border-gray-600/40 text-[9.5px] font-bold shrink-0 self-center">${ev.elvtrKindNm}</span>`
                   : '';

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { X, Settings, Trash2, MapPin, Hash, Cpu, Sun, Moon, Monitor, Bookmark, Building2, Eye, Folder, FolderPlus, EyeOff } from 'lucide-react';
+import { X, Settings, Trash2, MapPin, Hash, Cpu, Sun, Moon, Monitor, Bookmark, Building2, Eye, Folder, FolderPlus, EyeOff, List } from 'lucide-react';
 import { SettingsFields, SearchHistory, Bookmark as BookmarkType, BookmarkFolder, ThemeMode, ElevatorWithBadges } from '../types';
 import { useTheme } from '../utils/useTheme';
 import { getBookmarks, removeBookmark, getFolders, createFolder, updateFolder, deleteFolder } from '../utils/bookmarks';
@@ -10,53 +10,6 @@ import Pagination from './Pagination';
    1. 전체 삭제 실행 전 window.confirm 확인 절차 필수 유지
    2. e.stopPropagation 배선을 통해 상세 모달 클릭 시 하단 레이어 중복 생성 및 간섭 현상 완전 차단
    ────────────────────────────────────────────────── */
-
-const FIELD_GROUPS: { title: string; fields: { key: keyof SettingsFields; label: string }[] }[] = [
-  {
-    title: '기본 정보',
-    fields: [
-      { key: 'elvtrStts', label: '승강기 상태' },
-      { key: 'elvtrDivNm', label: '승강기 구분' },
-      { key: 'elvtrFormNm', label: '승강기 형식' },
-      { key: 'elvtrKindNm', label: '승강기 종류' },
-      { key: 'elvtrModel', label: '모델명' },
-      { key: 'installationPlace', label: '설치 위치' },
-      { key: 'shuttleSection', label: '운행 구간' },
-      { key: 'buldPrpos', label: '건물용도' },
-    ],
-  },
-  {
-    title: '설치 · 검사',
-    fields: [
-      { key: 'frstInstallationDe', label: '최초설치일' },
-      { key: 'installationDe', label: '설치일자' },
-      { key: 'lastInspctDe', label: '최종 검사일' },
-      { key: 'lastInspctKind', label: '최종 검사종류' },
-      { key: 'inspctInstt', label: '검사 기관' },
-    ],
-  },
-  {
-    title: '기술 제원',
-    fields: [
-      { key: 'divGroundFloorCnt', label: '지상 운행층수' },
-      { key: 'divUndgrndFloorCnt', label: '지하 운행층수' },
-      { key: 'ratedSpeed', label: '정격 속도' },
-      { key: 'ratedCap', label: '정원' },
-      { key: 'liveLoad', label: '적재하중' },
-      { key: 'mrYn', label: '기계실 여부' },
-    ],
-  },
-  {
-    title: '유지관리',
-    fields: [
-      { key: 'subcntrCpny', label: '보수업체명' },
-      { key: 'mntCpnyNm', label: '유지관리업체' },
-      { key: 'mntCpnyTelno', label: '유지관리 연락처' },
-      { key: 'partcpntNm', label: '관리주체명' },
-      { key: 'partcpntTelno', label: '관리주체 연락처' },
-    ],
-  },
-];
 
 const HISTORY_PER_PAGE = 5;
 const BOOKMARKS_PER_PAGE = 5;
@@ -115,7 +68,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
   const showBookmarks = !!accordionState['bookmarks'];
   const showSearchHistory = !!accordionState['searchHistory'];
   const showViewHistory = !!accordionState['viewHistory'];
-  const showFields = !!accordionState['fields'];
 
   const [searchHistoryPage, setSearchHistoryPage] = useState(1);
   const [viewHistoryPage, setViewHistoryPage] = useState(1);
@@ -137,8 +89,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
     ]).finally(() => setBookmarksLoading(false));
   }, []);
 
-  // ESC + back button close
-  // ESC + back button close
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -151,7 +101,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
     };
     window.addEventListener('popstate', onPopState);
     
-    // 전역 플래그 설정 (다른 컴포넌트에서 확인용)
     (window as any).__settingsMenuOpen = true;
     document.body.style.overflow = 'hidden';
     
@@ -164,7 +113,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
         history.replaceState(history.state._prev || {}, '');
       }
       
-      // ★ [안전 방어선 부활] 가변 변수 대신 전역 플래그를 검증하여 상세 모달까지 완벽히 닫혀있을 때만 스크롤 무조건 해제
       if (!(window as any).__elevatorModalOpen) {
         document.body.style.overflow = '';
       } else {
@@ -184,20 +132,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
     } catch {}
     refreshBookmarks();
   }, [refreshBookmarks]);
-
-  const toggle = (key: keyof SettingsFields) => {
-    onChange({ ...settings, [key]: !settings[key] });
-  };
-
-  const allOn = Object.values(settings).every(Boolean);
-  const toggleAll = () => {
-    const next = !allOn;
-    const updated = { ...settings };
-    for (const k of Object.keys(settings) as (keyof SettingsFields)[]) {
-      updated[k] = next;
-    }
-    onChange(updated);
-  };
 
   const clearSearchHistory = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -275,7 +209,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
     onClose();
   };
 
-  // 고유번호 7자리 검색 시 기록이 깨지던 결함 완벽 해결
   const getSearchTitle = (h: any) => {
     if (h.query && h.query.trim()) return h.query.trim();
     if (h.elevatorNo) return `고유번호: ${formatElevatorNo(h.elevatorNo)}`;
@@ -285,7 +218,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
     return '고유번호 검색';
   };
 
-  // 파편화된 주소, 제조사 필드를 매핑하는 지능형 통합 매퍼
   const normalizeItem = (item: any) => {
     const elData = item.elevator_data || item.elevatorData || item;
     const buildingName = item.building_name || item.buildingName || item.buldNm || elData.buldNm || '건물명 미기재';
@@ -317,8 +249,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
     return { buildingName, address, address1, address2, manufacturerName, elvtrModel, installationDe, elevatorNo, displayTimestamp };
   };
 
-  // 상세 모달 연동 정상화 및 레이어 소멸 방지
-  // ★ SettingsMenu는 열어두고 ElevatorModal만 열기 (두 레이어 공존)
   const handleItemClick = (e: React.MouseEvent, item: any) => {
     e.stopPropagation();
     if (onBookmarkSelect) {
@@ -347,7 +277,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
         };
         onBookmarkSelect(fullElevator);
       }
-      // SettingsMenu는 닫지 않음 - 사용자가 모달에서 돌아오면 설정이 그대로 있어야 함
     }
   };
 
@@ -463,12 +392,12 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
             </div>
 
             {showBookmarks && (
-              <div>
+              <div onClick={(e) => e.stopPropagation()}>
                 {bookmarksLoading ? (
                   <p className="text-xs text-gray-400 text-center py-3">로딩 중...</p>
                 ) : (
                   <div className="space-y-2">
-                    {/* Ungrouped bookmarks (폴더 없음) */}
+                    {/* Ungrouped bookmarks */}
                     {ungroupedBookmarks.length > 0 && (
                       <div className="space-y-1.5">
                         {pagedUngroupedBookmarks.map((bookmark) => {
@@ -498,11 +427,11 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                         <span className="font-bold text-gray-700 dark:text-gray-300">{normalized.manufacturerName}</span>
                                       )}
                                       {normalized.elvtrModel && (
-                                        <>{normalized.manufacturerName && <span className="text-gray-300 dark:text-gray-600">·</span>}
+                                        <><span className="text-gray-300 dark:text-gray-600">·</span>
                                         <span className="text-blue-600 dark:text-blue-400 font-semibold">{normalized.elvtrModel}</span></>
                                       )}
                                       {normalized.installationDe && (
-                                        <>{(normalized.manufacturerName || normalized.elvtrModel) && <span className="text-gray-300 dark:text-gray-600">·</span>}
+                                        <><span className="text-gray-300 dark:text-gray-600">·</span>
                                         <span>{normalized.installationDe}</span></>
                                       )}
                                     </div>
@@ -513,9 +442,8 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                 </div>
                               </div>
                               <button
-                                onClick={(e) => handleDeleteBookmark(e, bookmark.elevator_no)}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteBookmark(e, bookmark.elevator_no); }}
                                 className="shrink-0 p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-all self-center"
-                                title="북마크 삭제"
                               >
                                 <Trash2 size={11} />
                               </button>
@@ -552,7 +480,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                             <button
                               onClick={(e) => { e.stopPropagation(); handleToggleFolderActive(folder.id, folder.active); }}
                               className={`shrink-0 p-0.5 rounded transition-colors ${folder.active ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400'}`}
-                              title={folder.active ? '강조 켜짐' : '강조 꺼짐'}
                             >
                               {folder.active ? <Eye size={12} /> : <EyeOff size={12} />}
                             </button>
@@ -563,14 +490,13 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteFolder(e, folder.id); }}
                               className="shrink-0 p-0.5 text-gray-300 dark:text-gray-600 hover:text-red-400 transition-colors"
-                              title="폴더 삭제"
                             >
                               <Trash2 size={10} />
                             </button>
                           </div>
 
                           {isExpanded && (
-                            <div className="px-2 py-2 space-y-1.5 bg-white dark:bg-gray-900/50">
+                            <div className="px-2 py-2 space-y-1.5 bg-white dark:bg-gray-900/50" onClick={(e) => e.stopPropagation()}>
                               {folderBookmarks.length === 0 ? (
                                 <p className="text-[10px] text-gray-400 text-center py-2">북마크 없음</p>
                               ) : (
@@ -612,14 +538,13 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                               </div>
                                             )}
                                             <p className="text-[9px] text-gray-400 dark:text-gray-500 font-normal">
-                                              {formatElevatorNo(normalized.elevatorNo)}{normalized.displayTimestamp ? ` · ${normalized.displayTimestamp}` : ''}
+                                              {formatElevatorNo(normalized.elevatorNo)} · {normalized.displayTimestamp}
                                             </p>
                                           </div>
                                         </div>
                                         <button
-                                          onClick={(e) => handleDeleteBookmark(e, bookmark.elevator_no)}
+                                          onClick={(e) => { e.stopPropagation(); handleDeleteBookmark(e, bookmark.elevator_no); }}
                                           className="shrink-0 p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-all self-center"
-                                          title="북마크 삭제"
                                         >
                                           <Trash2 size={11} />
                                         </button>
@@ -641,7 +566,6 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                       );
                     })}
 
-                    {/* New folder input - placed after folder list */}
                     <div className="flex gap-1.5 pt-2 mt-2">
                       <input
                         type="text"
@@ -661,20 +585,17 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                     </div>
                   </div>
                 )}
-
-                {bookmarks.length === 0 && !bookmarksLoading && (
-                  <p className="text-xs text-gray-400 text-center py-3">북마크 없음</p>
-                )}
               </div>
             )}
           </div>
 
           {/* Search History */}
-          <div
-            className="border-t border-gray-100 dark:border-gray-800 pt-4 cursor-pointer"
-            onClick={() => toggleAccordion('searchHistory')}
-          >
-            <div className="flex items-center justify-between w-full mb-3">
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+            {/* 🎯 [버블링 탈출] 아코디언이 접히지 않도록 토글 이벤트를 상단 독립 제목구역으로 수축 한정 */}
+            <div
+              className="flex items-center justify-between w-full mb-3 cursor-pointer"
+              onClick={() => toggleAccordion('searchHistory')}
+            >
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <MapPin size={16} className="text-emerald-500 dark:text-emerald-400 shrink-0" />
                 <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200">검색 히스토리</h4>
@@ -700,7 +621,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
             </div>
 
             {showSearchHistory && (
-              <div>
+              <div onClick={(e) => e.stopPropagation()}>
                 {searchHistory.length === 0 ? (
                   <p className="text-xs text-gray-400 text-center py-3">검색 히스토리 없음</p>
                 ) : (
@@ -714,14 +635,34 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                         >
                           <div className="flex-1 min-w-0 space-y-0.5">
                             <div className="flex items-center gap-1.5">
+                              {/* 🎯 [버그 2 교정] 스냅샷 필드를 정밀 추적하여 고유번호(Hash), 건물명(Building2), 주소(List) 아이콘 완전 동기화 */}
                               {h.elevatorNo ? (
                                 <Hash size={11} className="text-blue-500 shrink-0" />
+                              ) : (h.searchTab === 'building' || h.buldNm !== undefined || 'sido' in h || 'sigungu' in h) ? (
+                                <Building2 size={11} className="text-indigo-500 shrink-0" />
                               ) : (
-                                <MapPin size={11} className="text-emerald-500 shrink-0" />
+                                <List size={11} className="text-emerald-500 shrink-0" />
                               )}
-                              <p className="text-[11px] font-bold text-gray-800 dark:text-gray-200 truncate">
-                                {getSearchTitle(h)}
-                              </p>
+                              
+                              <div className="text-[11px] font-bold text-gray-800 dark:text-gray-200 truncate flex-1 min-w-0">
+                                {h.elevatorNo ? (
+                                  getSearchTitle(h)
+                                ) : (h.searchTab === 'building' || h.buldNm !== undefined || 'sido' in h || 'sigungu' in h) ? (
+                                  /* 🎯 [버그 1 교정] 낱말 파쇄 방식 원천 차단 및 인풋창 단위 구조선(|) 정밀 가이드 탑재 (빈칸 완전 자동 제외) */
+                                  <span className="inline-flex items-center flex-wrap gap-0 font-bold">
+                                    {[h.sido || '', h.sigungu || '', h.buldNm || '']
+                                      .filter(Boolean)
+                                      .map((val, vIdx) => (
+                                        <span key={vIdx} className="inline-flex items-center">
+                                          {vIdx > 0 && <span className="text-gray-300 dark:text-gray-600 font-normal mx-1">|</span>}
+                                          <span>{val}</span>
+                                        </span>
+                                      ))}
+                                  </span>
+                                ) : (
+                                  h.query || '주소 검색'
+                                )}
+                              </div>
                             </div>
                             <div className="pl-4.5 space-y-0.5">
                               {h.elvtrModel && (
@@ -736,9 +677,8 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                             </div>
                           </div>
                           <button
-                            onClick={(e) => handleDeleteSearchHistory(e, h.timestamp)}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteSearchHistory(e, h.timestamp); }}
                             className="shrink-0 p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-all self-center"
-                            title="히스토리 삭제"
                           >
                             <Trash2 size={11} />
                           </button>
@@ -760,11 +700,11 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
           </div>
 
           {/* View History */}
-          <div
-            className="border-t border-gray-100 dark:border-gray-800 pt-4 cursor-pointer"
-            onClick={() => toggleAccordion('viewHistory')}
-          >
-            <div className="flex items-center justify-between w-full mb-3">
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+            <div
+              className="flex items-center justify-between w-full mb-3 cursor-pointer"
+              onClick={() => toggleAccordion('viewHistory')}
+            >
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <Eye size={16} className="text-blue-500 dark:text-blue-400 shrink-0" />
                 <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200">조회 히스토리</h4>
@@ -790,7 +730,7 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
             </div>
 
             {showViewHistory && (
-              <div>
+              <div onClick={(e) => e.stopPropagation()}>
                 {viewHistory.length === 0 ? (
                   <p className="text-xs text-gray-400 text-center py-3">조회 히스토리 없음</p>
                 ) : (
@@ -823,11 +763,11 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                                       <span className="font-bold text-gray-700 dark:text-gray-300">{normalized.manufacturerName}</span>
                                     )}
                                     {normalized.elvtrModel && (
-                                      <>{normalized.manufacturerName && <span className="text-gray-300 dark:text-gray-600">·</span>}
+                                      <><span className="text-gray-300 dark:text-gray-600">·</span>
                                       <span className="text-blue-600 dark:text-blue-400 font-semibold">{normalized.elvtrModel}</span></>
                                     )}
                                     {normalized.installationDe && (
-                                      <>{(normalized.manufacturerName || normalized.elvtrModel) && <span className="text-gray-300 dark:text-gray-600">·</span>}
+                                      <><span className="text-gray-300 dark:text-gray-600">·</span>
                                       <span>{normalized.installationDe}</span></>
                                     )}
                                   </div>
@@ -838,9 +778,8 @@ export default function SettingsMenu({ settings, onChange, onClose, onHistorySel
                               </div>
                             </div>
                             <button
-                              onClick={(e) => handleDeleteViewHistory(e, h.timestamp)}
+                              onClick={(e) => { e.stopPropagation(); handleDeleteViewHistory(e, h.timestamp); }}
                               className="shrink-0 p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-all self-center"
-                              title="히스토리 삭제"
                             >
                               <Trash2 size={11} />
                             </button>

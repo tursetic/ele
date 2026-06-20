@@ -107,6 +107,9 @@ export default function App() {
   const mapViewRef = useRef<{ getMapState: () => MapState | null; setMapState: (state: MapState) => void } | null>(null);
   const mainScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // 🎯 [메모리 패치 선언] 동일 탭 내에서 토글 스위칭할 때 불필요한 오픈 API 지오코딩 리로드를 가로막는 상호 비교 레퍼런스 가드 스냅샷
+  const lastGeocodedResultsKeyRef = useRef<string>('');
+
   const handleTabChange = useCallback((newTab: SearchTab) => {
     const currentTab = searchTab;
     const currentMapState = viewMode === 'map' && mapViewRef.current ? mapViewRef.current.getMapState() : null;
@@ -363,7 +366,6 @@ export default function App() {
     } finally { if (!signal?.aborted) setLoading(false); }
   }, []);
 
-  // 🎯 [완치 핵심 브랜치 가드] 현재 유저가 있는 활성화 탭(searchTab) 상태를 실시간 분석해 비밀 검색 타겟 분리
   const handleSecretInputKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
     if (secretInputBlockedRef.current || secretLoading) { setSecretInput(''); return; }
@@ -375,14 +377,13 @@ export default function App() {
       const allItems: ElevatorType[] = [];
 
       if (searchTab === 'address') {
-        // 1) 신규 광역 주소 검색 기반 대량 수집 파이프라인 가동
         const currentAddressQuery = addressQuery.trim();
         const firstResult = await searchByIntegrationAddress({ addressQuery: currentAddressQuery, pageNo: 1 });
         totalCountForSecret = firstResult.totalCount;
         if (totalCountForSecret > SECRET_MAX_TOTAL) {
           setError('정원 초과입니다. 나중에 타신 분은 내려주십시오.'); setSecretLoading(false); secretInputBlockedRef.current = true; return;
         }
-        const maxPage = Math.ceil(totalCountForSecret / 100); // 운행정보 API 수신량 규격인 100개 단위 페이징 루프
+        const maxPage = Math.ceil(totalCountForSecret / 100);
         for (let page = 1; page <= maxPage; page++) {
           const pageResult = await searchByIntegrationAddress({ addressQuery: currentAddressQuery, pageNo: page });
           allItems.push(...pageResult.items);
@@ -392,7 +393,6 @@ export default function App() {
         setPageResults(withBadges); setTotalCount(totalCountForSecret); setHasSearched(true);
         setLastSearchParams({ tab: 'address', addressQuery: currentAddressQuery });
       } else {
-        // 2) 기존 3칸짜리 건물명 검색 필터 기반 대량 수집 파이프라인 복원
         const currentSido = sido.trim() || undefined; const currentSigungu = sigungu.trim() || undefined; const currentBuldNm = building.trim() || undefined;
         const firstResult = await searchByAddress({ sido: currentSido, sigungu: currentSigungu, buldNm: currentBuldNm, pageNo: 1, numOfRows: '1' });
         totalCountForSecret = firstResult.totalCount;
@@ -413,16 +413,43 @@ export default function App() {
     } catch (err) { setError('검색 중 오류가 발생했습니다.'); } finally { setSecretLoading(false); }
   }, [secretInput, secretLoading, sido, sigungu, building, searchTab, addressQuery]);
 
+  // 🎯 [토글 버그 근본 완치 패치] viewMode가 'list'로 바뀔 때 고생해서 긁어온 geoGroups 캐시를 파괴하던 기존 결함을 제거하고 조건 가드 장착
   useEffect(() => {
+    if (displayResults.length === 0) {
+      geocodeAbortRef.current?.abort(); geocodeAbortRef.current = null;
+      setGeoGroups([]);
+      lastGeocodedResultsKeyRef.current = '';
+      return;
+    }
+
+    // 목록 보기 모드일 때는 지도 갱신 계산을 유예하되, 기존 데이터 테이블을 초기화하지(setGeoGroups([])) 않고 메모리에 온전히 킵(Keep)한다!
+    if (viewMode !== 'map') {
+      return;
+    }
+
+    // 결과 목록 식별을 위한 원자 키 생성
+    const currentResultsKey = `${displayResults.length}_${displayResults[0]?.elevatorNo || ''}_${displayResults[displayResults.length - 1]?.elevatorNo || ''}`;
+    
+    // 이미 현재 데이터 기반으로 마커 연산이 완료되어 킵(Keep)되어 있다면 지오코딩 프로세스를 실행하지 않고 우회 스킵
+    if (lastGeocodedResultsKeyRef.current === currentResultsKey && geoGroups.length > 0) {
+      return;
+    }
+
     geocodeAbortRef.current?.abort(); geocodeAbortRef.current = null;
-    if (displayResults.length === 0 || viewMode !== 'map') { setGeoGroups([]); return; }
     const addressMap = new Map<string, { buildingName: string; elevators: ElevatorWithBadges[] }>();
     for (const el of displayResults) {
       const addr = (el.address1 || el.address2 || '').trim(); if (!addr) continue;
       if (!addressMap.has(addr)) addressMap.set(addr, { buildingName: el.buldNm || '', elevators: [] });
       addressMap.get(addr)!.elevators.push(el);
     }
-    const uniqueAddresses = Array.from(addressMap.entries()); if (uniqueAddresses.length === 0) { setGeoGroups([]); setGeocoding(false); return; }
+    const uniqueAddresses = Array.from(addressMap.entries()); 
+    if (uniqueAddresses.length === 0) { 
+      setGeoGroups([]); 
+      setGeocoding(false); 
+      lastGeocodedResultsKeyRef.current = currentResultsKey;
+      return; 
+    }
+
     const controller = new AbortController(); geocodeAbortRef.current = controller; const signal = controller.signal;
     setGeocoding(true);
     const run = async () => {
@@ -441,11 +468,13 @@ export default function App() {
           settled.forEach((r) => { if (r.status === 'fulfilled' && r.value !== null) finalGeoGroups.push(r.value); });
           if (uniqueAddresses.length > BATCH_SIZE) await new Promise((resolve) => setTimeout(resolve, 20));
         }
-        if (signal?.aborted) return; setGeoGroups(finalGeoGroups);
-      } catch (err) { console.error(err); } finally { setGeocoding(false); }
+        if (signal?.aborted) return; 
+        setGeoGroups(finalGeoGroups);
+        lastGeocodedResultsKeyRef.current = currentResultsKey;
+      } catch (err) { console.error(err); } finally { if (!signal?.aborted) setGeocoding(false); }
     };
     run(); return () => { controller.abort(); };
-  }, [displayResults, viewMode]);
+  }, [displayResults, viewMode, geoGroups.length]);
 
   const handleSearch = useCallback(async () => {
     geocodeAbortRef.current?.abort(); searchAbortRef.current?.abort();
@@ -467,10 +496,15 @@ export default function App() {
     setLastSearchParams(params);
 
     let historyQuery = searchTab === 'elevatorNo' ? elevatorNoQuery.trim() : searchTab === 'address' ? addressQuery.trim() : [sido.trim(), sigungu.trim(), building.trim()].filter(Boolean).join(' ');
-    const historyEntry: SearchHistory = {
+    
+    // 🎯 [정합성 동기화] 이력 컴포넌트의 오독 현상을 방어하기 위해 객체 내부에 원본 상태값들을 명시적으로 직렬화 보관
+    const historyEntry: any = {
       type: 'search', query: historyQuery, timestamp: Date.now(),
+      searchTab,
+      sido: searchTab === 'building' ? sido.trim() : undefined,
+      sigungu: searchTab === 'building' ? sigungu.trim() : undefined,
+      buldNm: searchTab === 'building' ? building.trim() : undefined,
       ...(searchTab === 'elevatorNo' ? { elevatorNo: elevatorNoQuery.trim() } : {}),
-      ...(searchTab === 'building' && building.trim() ? { buldNm: building.trim() } : {}),
       ...(modelKeyword.trim() ? { elvtrModel: modelKeyword.trim() } : {}),
     };
     const existing = JSON.parse(localStorage.getItem('elevatorSearchHistory') || '[]');
@@ -485,16 +519,19 @@ export default function App() {
     if (lastSearchParams) fetchPage(page, lastSearchParams, controller.signal);
   }, [lastSearchParams, fetchPage]);
 
-  const handleHistorySelect = (history: SearchHistory) => {
+  const handleHistorySelect = (history: any) => {
     if (history.type === 'search' && history.elevatorNo) {
       setSearchTab('elevatorNo'); setElevatorNoQuery(history.elevatorNo); pendingHistorySearchRef.current = true;
     } else if (history.type === 'search') {
-      if (history.buldNm) {
-        setSearchTab('building'); const buldNm = history.buldNm || '';
-        const queryWithoutBuld = buldNm ? history.query.replace(new RegExp(`\\s*${buldNm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`), '').trim() : history.query;
-        const parts = queryWithoutBuld.split(/\s+/); setSido(parts[0] || ''); setSigungu(parts.length > 1 ? parts.slice(1).join(' ') : ''); setBuilding(buldNm);
+      // 🎯 [이력 복원 정밀 가드] 직렬화된 searchTab 상태 또는 단독 필드 유무를 가늠하여 정확한 타겟 탭으로 복원 매핑 완료
+      if (history.searchTab === 'building' || history.buldNm !== undefined || 'sido' in history || 'sigungu' in history) {
+        setSearchTab('building');
+        setSido(history.sido || '');
+        setSigungu(history.sigungu || '');
+        setBuilding(history.buldNm || '');
       } else {
-        setSearchTab('address'); setAddressQuery(history.query);
+        setSearchTab('address');
+        setAddressQuery(history.query);
       }
       pendingHistorySearchRef.current = true;
     } else if (history.elevatorNo) {
@@ -537,7 +574,7 @@ export default function App() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-black text-amber-800 dark:text-amber-300">북마크 승강기 제원 변동 사항 안내</p>
-              <button onClick={handleDismissChanges} className="p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-lg transition-colors focus:outline-none"><XCircle size={14} className="text-amber-500 dark:text-amber-400" /></button>
+              <p className="p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-lg transition-colors focus:outline-none" onClick={handleDismissChanges}><XCircle size={14} className="text-amber-500 dark:text-amber-400" /></p>
             </div>
             <div className="mt-1.5 space-y-1">
               {bookmarkChanges.map((c, idx) => (
